@@ -48,7 +48,9 @@
     "logs": "日誌",
     "settings": "系統配置",
     "reports": "報告管理",
-    "knowledge": "知識庫"
+    "knowledge": "知識庫",
+    "function": "功能",
+    "system": "系統"
   },
   "knowledge": {
     "title": "知識庫",

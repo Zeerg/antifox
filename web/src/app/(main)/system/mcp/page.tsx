@@ -129,8 +129,8 @@ export default function MCPPage() {
     setEditing(s);
     setClearEnv(false);
     setClearHeaders(false);
-    // 后端列表接口不回显已保存的 env/headers 明文（防泄露），故这里留空；
-    // 留空=保留旧值，填入=替换整组，勾选「清除」=显式清空。
+    // the list API never echoes saved env/headers plaintext (leak prevention), so these stay blank;
+    // blank=keep old values, filled=replace the whole set, "clear" checked=explicitly empty.
     setForm({
       name: s.name,
       transport: s.transport,
@@ -567,7 +567,7 @@ export default function MCPPage() {
         </SheetContent>
       </Sheet>
 
-      {/* ── MCP 调用统计 ── */}
+      {/* ── MCP call stats ── */}
       <Sheet open={statsOpen} onOpenChange={setStatsOpen}>
         <SheetContent side="right" className="flex w-full flex-col gap-0 data-[side=right]:sm:max-w-xl">
           <SheetHeader className="px-4 pt-4">

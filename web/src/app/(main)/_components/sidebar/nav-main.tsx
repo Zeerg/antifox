@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTranslation } from "react-i18next";
 
 import { ChevronRight, MailIcon, PlusCircleIcon } from "lucide-react";
 import { api } from "@/lib/api";
@@ -85,8 +86,9 @@ function hasSubItems(item: NavMainItem): item is NavMainParentItem {
 }
 
 export function NavMain({ items }: NavMainProps) {
+  const { t } = useTranslation();
   const rawPath = usePathname();
-  // 路由段含中文，pathname 可能是百分号编码，解码后再与导航 url 比较，保证高亮命中。
+  // Route segments may contain CJK — pathname can be percent-encoded, so decode before comparing to nav urls to hit the highlight.
   const path = (() => {
     try {
       return decodeURIComponent(rawPath);
@@ -117,7 +119,7 @@ export function NavMain({ items }: NavMainProps) {
         <SidebarGroup key={group.id}>
           {group.label && (
             <SidebarGroupLabel className="group-data-[collapsible=icon]:pointer-events-none">
-              {group.label}
+              {t(`nav.${group.id === 1 ? "function" : "system"}`, { defaultValue: group.label })}
             </SidebarGroupLabel>
           )}
           <SidebarGroupContent>
@@ -140,20 +142,28 @@ export function NavMain({ items }: NavMainProps) {
 }
 
 function NavItem({ item, isItemActive, isSubItemActive, isSubmenuOpen }: NavItemProps) {
+  const { t } = useTranslation();
   const { state, isMobile } = useSidebar();
+  const localized: NavMainItem = {
+    ...item,
+    title: t(`nav.${item.id}`, { defaultValue: item.title }),
+    ...(item.subItems
+      ? { subItems: item.subItems.map((sub) => ({ ...sub, title: t(`nav.${sub.id}`, { defaultValue: sub.title }) })) }
+      : {}),
+  } as NavMainItem;
   const isCollapsedDesktop = state === "collapsed" && !isMobile;
 
   if (!hasSubItems(item)) {
-    return <NavLinkItem item={item} isActive={isItemActive(item)} showIconFallback={isCollapsedDesktop} />;
+    return <NavLinkItem item={localized as NavMainLinkItem} isActive={isItemActive(item)} showIconFallback={isCollapsedDesktop} />;
   }
 
   if (isCollapsedDesktop) {
-    return <NavDropdownItem item={item} isActive={isItemActive(item)} isSubItemActive={isSubItemActive} />;
+    return <NavDropdownItem item={localized as NavMainParentItem} isActive={isItemActive(item)} isSubItemActive={isSubItemActive} />;
   }
 
   return (
     <NavCollapsibleItem
-      item={item}
+      item={localized as NavMainParentItem}
       isActive={isItemActive(item)}
       defaultOpen={isSubmenuOpen(item)}
       isSubItemActive={isSubItemActive}

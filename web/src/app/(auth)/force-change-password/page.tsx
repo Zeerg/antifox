@@ -26,7 +26,7 @@ export default function ForceChangePasswordPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // 未登录（无 token）直接回登录页；静态导出下无 middleware 代劳这层跳转。
+    // not logged in (no token) → back to the login page; static export has no middleware for this redirect.
     if (!auth.getToken()) router.replace("/login");
   }, [router]);
 
@@ -44,7 +44,7 @@ export default function ForceChangePasswordPage() {
     setLoading(true);
     try {
       await api.changePassword(currentPassword, newPassword);
-      // 改密后 must_change_password 已清，进入主界面。
+      // after the password change, must_change_password is cleared — enter the main UI.
       router.replace("/function/tasks");
     } catch (err) {
       setError((err as Error)?.message || t("changePassword.errFail", { msg: "" }));

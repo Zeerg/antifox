@@ -24,7 +24,7 @@ export default function LoginPage() {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    // 已登录直接进主界面（静态导出下无 middleware 代劳这层跳转）。
+    // already logged in → straight into the main UI (static export has no middleware to do this redirect).
     if (auth.getToken()) {
       router.replace("/function/tasks");
       return;
@@ -44,7 +44,7 @@ export default function LoginPage() {
     try {
       const { token, must_change_password } = await api.login(username.trim(), password);
       auth.setToken(token);
-      // 首启弱默认密码：强制先改密，再进入主界面（后端亦会对其它 API 拦截）。
+      // weak default password on first run: force a password change before entering the main UI (the backend also intercepts other APIs).
       router.replace(must_change_password ? "/force-change-password" : "/function/tasks");
     } catch (e) {
       setError((e as Error)?.message || t("login.errFailed"));
@@ -60,11 +60,11 @@ export default function LoginPage() {
       <div className="absolute top-4 right-4 z-20">
         <LanguageSwitcher />
       </div>
-      {/* Left brand panel — 特色背景图 login.jpg + AntiFox 品牌 */}
+      {/* Left brand panel — signature background login.jpg + AntiFox branding */}
       <div className="relative hidden flex-col items-center justify-center overflow-hidden p-12 text-center lg:flex lg:w-1/2">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/login.jpg" alt="" className="absolute inset-0 size-full object-cover" />
-        {/* 暗色渐变遮罩：保证 logo/文字清晰可读，并统一到品牌深蓝 */}
+        {/* dark gradient overlay: keeps logo/text legible and unifies into the brand dark blue */}
         <div className="absolute inset-0 bg-gradient-to-br from-[#0A1126]/90 via-[#0A1126]/55 to-[#0A1126]/90" />
         <div className="relative z-10 flex flex-col items-center gap-5 text-white">
           <AntifoxLogo className="size-24 drop-shadow-xl" />

@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
 const STATUSES: FindingStatus[] = ["open", "confirmed", "fixed", "false_positive", "ignored"];
 const SEVERITIES = ["critical", "high", "medium", "low"];
 
-// openPacket opens the exact recorded packet in the 流量 page in a NEW TAB (so the
+// openPacket opens the exact recorded packet in the Traffic page in a NEW TAB (so the
 // finding stays open for side-by-side screenshotting).
 function openPacket(exchangeId: string) {
   window.open(`/function/traffic?exchange=${encodeURIComponent(exchangeId)}`, "_blank", "noopener");
@@ -33,7 +33,7 @@ function openPacket(exchangeId: string) {
 
 // FindingDetail is the shared rich body for a finding — used by both the global
 // findings page and the task-detail findings tab. It lazy-loads the enrichment,
-// offers "AI 分析", editable name/target/severity/status, and renders the
+// offers "AI analysis", editable name/target/severity/status, and renders the
 // structured sections (description / risk / remediation / evidence).
 export function FindingDetail({ finding, onChanged }: { finding: Finding; onChanged?: () => void }) {
   const { t, i18n } = useTranslation();
@@ -44,7 +44,7 @@ export function FindingDetail({ finding, onChanged }: { finding: Finding; onChan
   const [editing, setEditing] = React.useState(false);
   const [form, setForm] = React.useState({ name: "", target: "", severity: "", status: "open" });
 
-  // Load persisted enrichment; also detect an in-flight AI-分析 job so returning to
+  // Load persisted enrichment; also detect an in-flight AI-analysis job so returning to
   // this finding mid-analysis resumes the spinner (the job runs server-side and is
   // never lost to a page switch).
   React.useEffect(() => {
@@ -104,7 +104,7 @@ export function FindingDetail({ finding, onChanged }: { finding: Finding; onChan
   const severity = enr?.severity || finding.severity;
   const status = (enr?.status || finding.status || "open") as FindingStatus;
 
-  // Kick off async AI 分析. Returns immediately; the polling effect (driven by the
+  // Kick off async AI analysis. Returns immediately; the polling effect (driven by the
   // analyzing flag) picks up the result — so switching pages can't abort it.
   function analyze() {
     setAnalyzing(true);
@@ -124,7 +124,7 @@ export function FindingDetail({ finding, onChanged }: { finding: Finding; onChan
   }
 
   // persist writes the triage fields and, when confirming an un-enriched finding,
-  // seamlessly picks up the auto-started 富化 (确认即富化): the server kicks the job,
+  // seamlessly picks up the auto-started enrichment (enrich-on-confirm): the server kicks the job,
   // we flip on the analyzing spinner and the existing poll streams in the result.
   function persist(patch: { name: string; target: string; severity: string; status: string }) {
     api
@@ -142,14 +142,14 @@ export function FindingDetail({ finding, onChanged }: { finding: Finding; onChan
   }
 
   // setStatus flips just the status from the header pill (no edit mode) — the common
-  // "triage → 已确认" action; confirming auto-enriches via persist().
+  // "triage → confirmed" action; confirming auto-enriches via persist().
   function setStatus(next: string) {
     if (next === status) return;
     persist({ name, target, severity, status: next });
   }
 
-  // copyReport assembles a plain-markdown version of the whole finding (名称/严重度/
-  // 目标/CVSS + 描述/风险/修复 + 结构化复现) to the clipboard — the 复制 button, for
+  // copyReport assembles a plain-markdown version of the whole finding (name/severity/
+  // target/CVSS + description/risk/remediation + structured reproduction) to the clipboard — the copy button, for
   // pasting a single vuln into tickets/chat without exporting a full report.
   function copyReport() {
     const L: string[] = [`# ${name}`];
@@ -230,7 +230,7 @@ export function FindingDetail({ finding, onChanged }: { finding: Finding; onChan
               {name}
             </span>
             <StatusBadge domain="severity" value={severity} dot />
-            {/* 状态下拉 pill：直接改状态/确认，无需进编辑；选"已确认"即触发后台自动富化 */}
+            {/* status dropdown pill: change status/confirm inline without editing; selecting "confirmed" triggers background auto-enrichment */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
@@ -323,11 +323,11 @@ export function FindingDetail({ finding, onChanged }: { finding: Finding; onChan
         </Section>
       ) : null}
 
-      {/* ── 复现过程：有结构化 reproduction 时显式分步 + 每步证据；否则平铺 test_process + 单一证据区 ── */}
+      {/* ── reproduction: explicit steps + per-step evidence when structured reproduction exists; otherwise flat test_process + single evidence area ── */}
       <ReproductionSection nodeId={String(nodeId)} repro={repro} blocks={enr?.test_process ?? []} />
 
-      {/* ── raw evidence / PoC ── 当有结构化复现步骤时，步骤+请求/响应+截图已是实打实的证据，
-           原始 PoC 折叠成"来源/原始"审计项；无结构化时它仍是主证据，照常展开。 */}
+      {/* ── raw evidence / PoC ── with structured reproduction steps, steps+request/response+screenshots are already hard evidence;
+           the raw PoC collapses into a "provenance/raw" audit item; without structure it remains the primary evidence, expanded as usual. */}
       {(() => {
         const hasRepro = (repro?.steps?.length ?? 0) > 0 || !!repro?.entry_point;
         const pre = (
@@ -364,13 +364,13 @@ export function FindingDetail({ finding, onChanged }: { finding: Finding; onChan
         );
       })()}
 
-      {/* ── 关联流量（手动/引擎自动记录的证据来源；可一键进截图模式截图）── */}
+      {/* ── linked traffic (evidence sources recorded manually or automatically by the engine; one click into screenshot mode) ── */}
       <TrafficLinksSection nodeId={String(nodeId)} />
     </div>
   );
 }
 
-// TrafficLinksSection 展示该漏洞关联的真实流量（证据来源）：每条可「截图」进截图模式、可解除关联。
+// TrafficLinksSection shows real traffic linked to this finding (evidence sources): each can be screenshotted in shot mode or unlinked.
 function TrafficLinksSection({ nodeId }: { nodeId: string }) {
   const { t } = useTranslation();
   const [items, setItems] = React.useState<TrafficExchange[]>([]);
@@ -441,10 +441,10 @@ function TrafficLinksSection({ nodeId }: { nodeId: string }) {
   );
 }
 
-// ReproductionSection 渲染复现过程并把证据截图按【步骤】归位：
-//  - 有结构化 reproduction（agent 就地记录）→ 显式分步：入口/前置头 + 每步(说明+逐字请求) + 该步证据上传区 + 来源脚注 + 概览证据区。
-//  - 否则 → 平铺 test_process（兼容旧富化）+ 单一证据区。
-// 证据与步骤的对应：finding_evidence.step_index == 步骤号(1..N)，0 = 概览/未归属。
+// ReproductionSection renders the reproduction process and slots evidence screenshots per step:
+//  - with structured reproduction (agent-recorded in place) → explicit steps: entry/precondition header + per-step (description+verbatim request) + per-step evidence upload + provenance footer + overview evidence area.
+//  - otherwise → flat test_process (legacy-enrichment compatible) + single evidence area.
+// Evidence↔step mapping: finding_evidence.step_index == step number (1..N); 0 = overview/unassigned.
 function ReproductionSection({
   nodeId,
   repro,
@@ -482,7 +482,7 @@ function ReproductionSection({
       <div className="min-w-0 space-y-3">
         {hasStructured ? (
           <>
-            {/* 入口点 / 前置条件 */}
+            {/* entry point / preconditions */}
             {(repro?.entry_point || (repro?.prerequisites?.length ?? 0) > 0) && (
               <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
                 {repro?.entry_point && (
@@ -503,7 +503,7 @@ function ReproductionSection({
                 )}
               </div>
             )}
-            {/* 分步：每步 说明 + 逐字请求 + 该步证据 */}
+            {/* steps: description + verbatim request + per-step evidence */}
             {steps.map((st, i) => {
               const n = i + 1;
               const desc = [st.expected, st.proves].filter(Boolean).join(" ｜ ");
@@ -526,7 +526,7 @@ function ReproductionSection({
                       </Button>
                     )}
                   </div>
-                  {/* 关键请求/响应（agent 记录的标准 HTTP 报文关键部分）；完整流量包靠步骤头部「查看流量包」跳转。 */}
+                  {/* key request/response (salient parts of standard HTTP messages recorded by the agent); the full packet opens via the step header "view packet" link */}
                   {st.request?.trim() && (
                     <pre className="mt-1.5 max-w-full min-w-0 overflow-x-auto rounded bg-muted px-3 py-2 font-mono text-xs break-words whitespace-pre-wrap">
                       {st.request}
@@ -560,7 +560,7 @@ function ReproductionSection({
                 {t("findings.reproProvenance")}：{repro.provenance}
               </p>
             )}
-            {/* 概览/未归属证据 */}
+            {/* overview/unassigned evidence */}
             <div className="rounded-md border border-dashed px-3 py-2">
               <div className="mb-1 text-xs font-medium text-muted-foreground">{t("findings.reproOverviewShots")}</div>
               <EvidenceStrip nodeId={nodeId} stepIndex={0} items={byStep.get(0) ?? []} onZoom={setLightbox} onChanged={load} />
@@ -568,7 +568,7 @@ function ReproductionSection({
           </>
         ) : (
           <>
-            {/* 旧富化：平铺 test_process */}
+            {/* legacy enrichment: flat test_process */}
             {blocks.length > 0 && (
               <div className="min-w-0 space-y-1.5">
                 {blocks.map((b, i) =>
@@ -613,7 +613,7 @@ function ReproductionSection({
   );
 }
 
-// EvidenceStrip 是一个步骤（或概览区）下的证据截图条：缩略图 + 图注(失焦存) + 删除 + 上传(绑定 stepIndex)。
+// EvidenceStrip is the evidence-screenshot strip under a step (or the overview area): thumbnails + caption (save on blur) + delete + upload (bound to stepIndex).
 function EvidenceStrip({
   nodeId,
   stepIndex,
@@ -627,8 +627,8 @@ function EvidenceStrip({
   items: FindingEvidenceItem[];
   onZoom: (url: string) => void;
   onChanged: () => void;
-  // Step-derived caption (from the agent's 复现 step text); pre-fills empty captions so
-  // 图注 is auto-written yet editable. New uploads already carry a server-derived caption.
+  // Step-derived caption (from the agent's reproduction step text); pre-fills empty captions so
+  // caption is auto-written yet editable. New uploads already carry a server-derived caption.
   suggestedCaption?: string;
 }) {
   const { t } = useTranslation();
@@ -653,7 +653,7 @@ function EvidenceStrip({
   function onFiles(files: FileList | null) {
     if (files?.length) doUpload(Array.from(files));
   }
-  // 粘贴截图：截图后直接 Ctrl/Cmd+V 粘到该步（聚焦上传区后粘贴），省去"先存盘再上传"。
+  // paste screenshots: Ctrl/Cmd+V straight into the step (after focusing the upload zone) — no save-then-upload dance.
   function onPaste(e: React.ClipboardEvent) {
     const imgs = Array.from(e.clipboardData?.items ?? [])
       .filter((it) => it.kind === "file" && it.type.startsWith("image/"))
@@ -715,7 +715,7 @@ function EvidenceStrip({
           />
         </figure>
       ))}
-      {/* 可点击/拖拽/粘贴 的上传区：点"选择文件"开文件框；聚焦此区后 Ctrl/Cmd+V 粘贴截图；或直接拖图进来 */}
+      {/* click/drag/paste upload zone: "choose file" opens the picker; Ctrl/Cmd+V pastes after focusing; or drop images in */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: focusable paste/drop zone */}
       <div
         tabIndex={0}

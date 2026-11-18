@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { useRouter } from "next/navigation";
+import { useTranslation } from "react-i18next";
 
 import { Search } from "lucide-react";
 
@@ -23,6 +24,7 @@ import { sidebarItems } from "@/navigation/sidebar/sidebar-items";
 type SearchItem = {
   id: string;
   group: string;
+  groupKey: string;
   label: string;
   url: string;
   icon?: NavMainItem["icon"];
@@ -36,12 +38,15 @@ function getSubItemGroup(groupLabel: string | undefined, itemTitle: string) {
   return sidebarGroupLabels.has(itemTitle) ? (groupLabel ?? "Other") : itemTitle;
 }
 
+const groupKeyOf = (groupId: number) => (groupId === 1 ? "function" : "system");
+
 const searchItems: SearchItem[] = sidebarItems.flatMap((group) =>
   group.items.flatMap((item) => {
     if (item.subItems) {
       return item.subItems.map((sub) => ({
         id: sub.id,
         group: getSubItemGroup(group.label, item.title),
+        groupKey: sidebarGroupLabels.has(item.title) ? groupKeyOf(group.id) : item.id,
         label: sub.title,
         url: sub.url,
         icon: item.icon,
@@ -53,6 +58,7 @@ const searchItems: SearchItem[] = sidebarItems.flatMap((group) =>
       {
         id: item.id,
         group: group.label ?? "Other",
+        groupKey: group.label ? groupKeyOf(group.id) : item.id,
         label: item.title,
         url: item.url,
         icon: item.icon,
@@ -63,12 +69,6 @@ const searchItems: SearchItem[] = sidebarItems.flatMap((group) =>
   }),
 );
 
-function getAvailableItems(items: SearchItem[]) {
-  return items.filter((item) => !item.disabled && !item.url.includes("coming-soon"));
-}
-
-const recommendations = getAvailableItems(searchItems);
-
 function groupBy(items: SearchItem[]) {
   const groups = [...new Set(items.map((item) => item.group))];
   return groups.map((group) => ({
@@ -78,9 +78,23 @@ function groupBy(items: SearchItem[]) {
 }
 
 export function SearchDialog() {
+  const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const router = useRouter();
+  const localizedSearchItems = React.useMemo(
+    () =>
+      searchItems.map((item) => ({
+        ...item,
+        group: t(`nav.${item.groupKey}`, { defaultValue: item.group }),
+        label: t(`nav.${item.id}`, { defaultValue: item.label }),
+      })),
+    [t],
+  );
+  const localizedRecommendations = React.useMemo(
+    () => localizedSearchItems.filter((item) => !item.disabled && !item.url.includes("coming-soon")),
+    [localizedSearchItems],
+  );
 
   React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -148,7 +162,7 @@ export function SearchDialog() {
           <CommandInput placeholder="Search dashboards, users, and more…" value={query} onValueChange={setQuery} />
           <CommandList>
             <CommandEmpty>No results found.</CommandEmpty>
-            {query ? renderGroups(searchItems) : renderGroups(recommendations)}
+            {query ? renderGroups(localizedSearchItems) : renderGroups(localizedRecommendations)}
           </CommandList>
         </Command>
       </CommandDialog>

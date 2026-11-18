@@ -48,7 +48,9 @@
     "logs": "Logs",
     "settings": "Settings",
     "reports": "Reports",
-    "knowledge": "Knowledge"
+    "knowledge": "Knowledge",
+    "function": "Features",
+    "system": "System"
   },
   "knowledge": {
     "title": "Knowledge Base",
