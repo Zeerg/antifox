@@ -10,7 +10,7 @@ English
 
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/Zeerg/antifox?color=success)](https://github.com/Zeerg/antifox/releases/latest)
-[![Docker](https://img.shields.io/badge/GHCR-ghcr.io%2Fantifox--ai%2Fantifox-2496ED?logo=docker&logoColor=white)](https://github.com/Zeerg/antifox/pkgs/container/antifox)
+[![Docker](https://img.shields.io/badge/GHCR-ghcr.io%2Fzeerg%2Fantifox-2496ED?logo=docker&logoColor=white)](https://github.com/Zeerg/antifox/pkgs/container/antifox)
 [![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go&logoColor=white)](go.mod)
 
 <img src="screenshots/login-en.png" alt="AntiFox" width="860" />
