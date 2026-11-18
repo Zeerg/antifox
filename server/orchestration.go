@@ -12,6 +12,7 @@ import (
 	"antifox/agent"
 	"antifox/engine/permission"
 	actool "antifox/engine/tool"
+	"antifox/traffic"
 )
 
 // jsonResult marshals v to a JSON tool result.
@@ -408,6 +409,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.reseedAgentPrompt("worker", "prompt_reproduction_recipe_v1", "report_finding fills a structured reproduction (recorded inline, requests verbatim-real)")
 	s.reseedAgentPrompt("pentest", "prompt_reproduction_recipe_pentest_v1", "report_finding fills a structured reproduction")
 	s.reseedAgentPrompt("mainagent", "prompt_reproduction_recipe_mainagent_v1", "report_finding fills a structured reproduction")
+	s.migrateSeedTextToEnglish()
 	s.bumpWorkerRunSecondsTo1200() // worker per-round wall-clock 600→1200s (default value only when not user-customized; ref AntiFox 0.3.3)
 	// Note: pentest's default tool bindings need no migration — BuiltinToolSeeds
 	// already seeds list_assets/insert_assets/report_finding/list_findings/
@@ -514,6 +516,40 @@ func (s *Server) bumpWorkerRunSecondsTo1200() {
 			return
 		}
 		log.Printf("[worker] per-round wall-clock default 600→1200s")
+	}
+	_ = s.m.pg.SetSetting(flag, "true")
+}
+
+// migrateSeedTextToEnglish propagates the English-translation defaults into DBs
+// seeded before the translation: every built-in agent's prompt body (each under
+// its own once-flag, appended as a new version so the old text stays in history)
+// and every built-in tool's description/schema (RefreshToolDefaults preserves
+// agent bindings + enabled flags).
+func (s *Server) migrateSeedTextToEnglish() {
+	for key := range agent.BuiltinPromptSeeds() {
+		s.reseedAgentPrompt(key, "prompt_en_v1_"+key, "English translation of built-in prompts")
+	}
+	const flag = "tool_desc_en_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	for _, sd := range agent.BuiltinToolSeeds() {
+		schema, _ := json.Marshal(sd.Schema)
+		if err := s.m.pg.RefreshToolDefaults(sd.Key, sd.Desc, schema); err != nil {
+			log.Printf("[tools] en-desc refresh %s failed: %v", sd.Key, err)
+		}
+	}
+	for _, t := range traffic.SeedToolMetas() {
+		schema, _ := json.Marshal(t.InputSchema())
+		if err := s.m.pg.RefreshToolDefaults(t.Name(), t.Description(), schema); err != nil {
+			log.Printf("[tools] en-desc refresh %s failed: %v", t.Name(), err)
+		}
+	}
+	for _, t := range append(s.orchestrationTools(), s.platformTools()...) {
+		schema, _ := json.Marshal(t.InputSchema())
+		if err := s.m.pg.RefreshToolDefaults(t.Name(), t.Description(), schema); err != nil {
+			log.Printf("[tools] en-desc refresh %s failed: %v", t.Name(), err)
+		}
 	}
 	_ = s.m.pg.SetSetting(flag, "true")
 }

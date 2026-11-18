@@ -237,6 +237,7 @@ ON CONFLICT (name) DO NOTHING`,
 	if err := d.seedDefaultInterceptRules(); err != nil {
 		return fmt.Errorf("seed intercept rules: %w", err)
 	}
+	d.backfillSeedTextEnglish()
 	d.ensureKnowledgeVectorSchema() // best-effort; degrades to keyword search if pgvector absent
 	return nil
 }
@@ -358,6 +359,181 @@ ON CONFLICT (agent_id, resource_kind, resource_id, mcp_tool_name) DO NOTHING`, k
 	return nil
 }
 
+// interceptRuleSeed is one built-in safety intercept rule; seeds insert once and
+// backfillSeedTextEnglish rewrites old-language text on already-seeded rows.
+type interceptRuleSeed struct {
+	name     string
+	target   string // tool_name | tool_input
+	typ      string // string | regex
+	pattern  string
+	action   string
+	message  string
+	priority int
+}
+
+var defaultInterceptRuleSeeds = []interceptRuleSeed{
+	// ── system-destructive commands (priority 100) ──────────────────────────────
+	{
+		name:     "[builtin] recursive force-delete rm -rf",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `(?i)\brm\b.{0,80}(?:-[a-z]*r[a-z]*f[a-z]*|-[a-z]*f[a-z]*r[a-z]*|--recursive|--no-preserve-root)`,
+		action:   "deny",
+		message:  "recursive force-delete is forbidden (rm -rf / rm --recursive) — it can permanently damage the system or target environment",
+		priority: 100,
+	},
+	{
+		name:     "[builtin] delete critical system directories",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `\brm\b[^"'\n]{0,60}["'\s](/|/etc|/bin|/usr|/boot|/var|/lib|/sys|/proc|/dev|/sbin|/root)`,
+		action:   "deny",
+		message:  "deleting critical system paths is forbidden",
+		priority: 100,
+	},
+	{
+		name:     "[builtin] disk formatting mkfs",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `\bmkfs\b`,
+		action:   "deny",
+		message:  "formatting disks (mkfs) is forbidden",
+		priority: 100,
+	},
+	{
+		name:     "[builtin] overwrite disk device with dd",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `\bdd\b[^|\n]{0,100}\bof=\s*/dev/[a-zA-Z]`,
+		action:   "deny",
+		message:  "overwriting disk devices with dd is forbidden",
+		priority: 100,
+	},
+	{
+		name:     "[builtin] fork bomb",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `:\(\)\s*\{[^}]*:\|:`,
+		action:   "deny",
+		message:  "fork bombs are forbidden",
+		priority: 100,
+	},
+	{
+		name:     "[builtin] shutdown / reboot",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `\b(?:shutdown|reboot|halt|poweroff|init\s+[06])\b`,
+		action:   "deny",
+		message:  "shutdown or reboot commands are forbidden",
+		priority: 100,
+	},
+	{
+		name:     "[builtin] kill all processes",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `\bkill\s+-9\s+-1\b|\bkillall\s+-9\b`,
+		action:   "deny",
+		message:  "kill -9 -1 or killall -9 is forbidden (kills all processes)",
+		priority: 100,
+	},
+	{
+		name:     "[builtin] disk wiping shred / wipe",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `\b(?:shred|wipe)\b[^|\n]{0,80}/dev/[a-zA-Z]`,
+		action:   "deny",
+		message:  "running shred/wipe on disk devices is forbidden",
+		priority: 100,
+	},
+	{
+		name:     "[builtin] flush firewall rules",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `\biptables\s+(?:-F|--flush)\b|\bnft\s+flush\s+ruleset\b`,
+		action:   "deny",
+		message:  "flushing firewall rules is forbidden (iptables -F / nft flush)",
+		priority: 100,
+	},
+	// ── destructive database operations (priority 90) ─────────────────────────
+	{
+		name:     "[builtin] SQL DROP DATABASE / TABLE / SCHEMA",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `(?i)\bDROP\s+(?:DATABASE|TABLE|SCHEMA|INDEX|VIEW|TABLESPACE|USER|ROLE)\b`,
+		action:   "deny",
+		message:  "DROP operations are forbidden — they can irreversibly destroy database objects",
+		priority: 90,
+	},
+	{
+		name:     "[builtin] SQL TRUNCATE",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `(?i)\bTRUNCATE\s+(?:TABLE\s+)?\w`,
+		action:   "deny",
+		message:  "TRUNCATE is forbidden — it may empty all data in a table",
+		priority: 90,
+	},
+	{
+		name:     "[builtin] MongoDB drop / dropDatabase",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `(?i)\.(?:dropDatabase|dropCollection|drop)\s*\(`,
+		action:   "deny",
+		message:  "MongoDB drop operations are forbidden",
+		priority: 90,
+	},
+	{
+		name:     "[builtin] Redis FLUSHALL / FLUSHDB",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `(?i)\b(?:FLUSHALL|FLUSHDB)\b`,
+		action:   "deny",
+		message:  "Redis FLUSHALL / FLUSHDB is forbidden — it may wipe all cached data",
+		priority: 90,
+	},
+	// ── destructive HTTP requests (priority 80) ──────────────────────────────
+	// Three common ways an agent sends DELETE requests:
+	//   1. curl -X DELETE / --request DELETE (via Bash directly or inside a script)
+	//   2. Python HTTP client .delete() method
+	//   3. method: 'DELETE' / method="DELETE" in JS/generic scripts
+	{
+		name:     "[builtin] curl / wget sending DELETE requests",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `(?i)\bcurl\b[^|\n&;"]{0,300}(?:-X\s*DELETE|--request\s+DELETE|-XDELETE)|\bwget\b[^|\n&;"]{0,300}--method[=\s]+DELETE`,
+		action:   "deny",
+		message:  "sending HTTP DELETE requests via curl/wget is forbidden — it may delete target-system data",
+		priority: 80,
+	},
+	{
+		name:     "[builtin] Python HTTP client DELETE (requests/httpx/aiohttp)",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `(?i)\b(?:requests|httpx|aiohttp|urllib\.request)\.delete\s*\(|session\.delete\s*\(|client\.delete\s*\(`,
+		action:   "deny",
+		message:  "sending DELETE requests via Python HTTP clients is forbidden",
+		priority: 80,
+	},
+	{
+		name:     "[builtin] declaring HTTP DELETE method in scripts (JS/generic)",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `(?i)axios\.delete\s*\(|method\s*[:=]\s*['"]DELETE['"]`,
+		action:   "deny",
+		message:  "declaring and sending HTTP DELETE requests in scripts is forbidden",
+		priority: 80,
+	},
+	{
+		name:     "[builtin] bulk clear / wipe endpoint paths",
+		target:   "tool_input",
+		typ:      "regex",
+		pattern:  `(?i)/(?:clear|wipe|flush|purge|truncate|drop|destroy|factory[-_]reset|reset[-_]all)(?:[/?#"'\s]|$)`,
+		action:   "deny",
+		message:  "calling bulk-clear or destroy-type endpoints is forbidden (/clear /wipe /flush /purge etc.)",
+		priority: 80,
+	},
+}
+
 // seedDefaultInterceptRules inserts built-in safety intercept rules once on
 // first startup. The seed is gated by a settings flag so user edits (disable,
 // delete, re-order) are never overwritten on subsequent restarts.
@@ -365,178 +541,7 @@ func (d *DB) seedDefaultInterceptRules() error {
 	if v, _, _ := d.GetSetting("intercept_default_rules_v1"); v == "done" {
 		return nil
 	}
-	type rule struct {
-		name     string
-		target   string // tool_name | tool_input
-		typ      string // string | regex
-		pattern  string
-		action   string
-		message  string
-		priority int
-	}
-	rules := []rule{
-		// ── system-destructive commands (priority 100) ──────────────────────────────
-		{
-			name:     "[builtin] recursive force-delete rm -rf",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `(?i)\brm\b.{0,80}(?:-[a-z]*r[a-z]*f[a-z]*|-[a-z]*f[a-z]*r[a-z]*|--recursive|--no-preserve-root)`,
-			action:   "deny",
-			message:  "recursive force-delete is forbidden (rm -rf / rm --recursive) — it can permanently damage the system or target environment",
-			priority: 100,
-		},
-		{
-			name:     "[builtin] delete critical system directories",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `\brm\b[^"'\n]{0,60}["'\s](/|/etc|/bin|/usr|/boot|/var|/lib|/sys|/proc|/dev|/sbin|/root)`,
-			action:   "deny",
-			message:  "deleting critical system paths is forbidden",
-			priority: 100,
-		},
-		{
-			name:     "[builtin] disk formatting mkfs",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `\bmkfs\b`,
-			action:   "deny",
-			message:  "formatting disks (mkfs) is forbidden",
-			priority: 100,
-		},
-		{
-			name:     "[builtin] overwrite disk device with dd",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `\bdd\b[^|\n]{0,100}\bof=\s*/dev/[a-zA-Z]`,
-			action:   "deny",
-			message:  "overwriting disk devices with dd is forbidden",
-			priority: 100,
-		},
-		{
-			name:     "[builtin] fork bomb",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `:\(\)\s*\{[^}]*:\|:`,
-			action:   "deny",
-			message:  "fork bombs are forbidden",
-			priority: 100,
-		},
-		{
-			name:     "[builtin] shutdown / reboot",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `\b(?:shutdown|reboot|halt|poweroff|init\s+[06])\b`,
-			action:   "deny",
-			message:  "shutdown or reboot commands are forbidden",
-			priority: 100,
-		},
-		{
-			name:     "[builtin] kill all processes",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `\bkill\s+-9\s+-1\b|\bkillall\s+-9\b`,
-			action:   "deny",
-			message:  "kill -9 -1 or killall -9 is forbidden (kills all processes)",
-			priority: 100,
-		},
-		{
-			name:     "[builtin] disk wiping shred / wipe",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `\b(?:shred|wipe)\b[^|\n]{0,80}/dev/[a-zA-Z]`,
-			action:   "deny",
-			message:  "running shred/wipe on disk devices is forbidden",
-			priority: 100,
-		},
-		{
-			name:     "[builtin] flush firewall rules",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `\biptables\s+(?:-F|--flush)\b|\bnft\s+flush\s+ruleset\b`,
-			action:   "deny",
-			message:  "flushing firewall rules is forbidden (iptables -F / nft flush)",
-			priority: 100,
-		},
-		// ── destructive database operations (priority 90) ─────────────────────────
-		{
-			name:     "[builtin] SQL DROP DATABASE / TABLE / SCHEMA",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `(?i)\bDROP\s+(?:DATABASE|TABLE|SCHEMA|INDEX|VIEW|TABLESPACE|USER|ROLE)\b`,
-			action:   "deny",
-			message:  "DROP operations are forbidden — they can irreversibly destroy database objects",
-			priority: 90,
-		},
-		{
-			name:     "[builtin] SQL TRUNCATE",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `(?i)\bTRUNCATE\s+(?:TABLE\s+)?\w`,
-			action:   "deny",
-			message:  "TRUNCATE is forbidden — it may empty all data in a table",
-			priority: 90,
-		},
-		{
-			name:     "[builtin] MongoDB drop / dropDatabase",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `(?i)\.(?:dropDatabase|dropCollection|drop)\s*\(`,
-			action:   "deny",
-			message:  "MongoDB drop operations are forbidden",
-			priority: 90,
-		},
-		{
-			name:     "[builtin] Redis FLUSHALL / FLUSHDB",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `(?i)\b(?:FLUSHALL|FLUSHDB)\b`,
-			action:   "deny",
-			message:  "Redis FLUSHALL / FLUSHDB is forbidden — it may wipe all cached data",
-			priority: 90,
-		},
-		// ── destructive HTTP requests (priority 80) ──────────────────────────────
-		// Three common ways an agent sends DELETE requests:
-		//   1. curl -X DELETE / --request DELETE (via Bash directly or inside a script)
-		//   2. Python HTTP client .delete() method
-		//   3. method: 'DELETE' / method="DELETE" in JS/generic scripts
-		{
-			name:     "[builtin] curl / wget sending DELETE requests",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `(?i)\bcurl\b[^|\n&;"]{0,300}(?:-X\s*DELETE|--request\s+DELETE|-XDELETE)|\bwget\b[^|\n&;"]{0,300}--method[=\s]+DELETE`,
-			action:   "deny",
-			message:  "sending HTTP DELETE requests via curl/wget is forbidden — it may delete target-system data",
-			priority: 80,
-		},
-		{
-			name:     "[builtin] Python HTTP client DELETE (requests/httpx/aiohttp)",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `(?i)\b(?:requests|httpx|aiohttp|urllib\.request)\.delete\s*\(|session\.delete\s*\(|client\.delete\s*\(`,
-			action:   "deny",
-			message:  "sending DELETE requests via Python HTTP clients is forbidden",
-			priority: 80,
-		},
-		{
-			name:     "[builtin] declaring HTTP DELETE method in scripts (JS/generic)",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `(?i)axios\.delete\s*\(|method\s*[:=]\s*['"]DELETE['"]`,
-			action:   "deny",
-			message:  "declaring and sending HTTP DELETE requests in scripts is forbidden",
-			priority: 80,
-		},
-		{
-			name:     "[builtin] bulk clear / wipe endpoint paths",
-			target:   "tool_input",
-			typ:      "regex",
-			pattern:  `(?i)/(?:clear|wipe|flush|purge|truncate|drop|destroy|factory[-_]reset|reset[-_]all)(?:[/?#"'\s]|$)`,
-			action:   "deny",
-			message:  "calling bulk-clear or destroy-type endpoints is forbidden (/clear /wipe /flush /purge etc.)",
-			priority: 80,
-		},
-	}
-	for _, r := range rules {
+	for _, r := range defaultInterceptRuleSeeds {
 		if _, err := d.Exec(`
 INSERT INTO intercept_rules(name, enabled, priority, match_target, match_type, pattern, action, message, timeout_enabled, timeout_seconds, timeout_action)
 VALUES ($1, true, $2, $3, $4, $5, $6, $7, false, 60, 'deny')
@@ -547,4 +552,26 @@ ON CONFLICT DO NOTHING`,
 		}
 	}
 	return d.SetSetting("intercept_default_rules_v1", "done")
+}
+
+// backfillSeedTextEnglish rewrites user-visible text on rows seeded before the
+// codebase was translated to English — builtin intercept-rule names/messages,
+// builtin MCP descriptions, the built-in admin display name — ONCE (settings
+// flag), matching only rows that still carry the old Chinese text so operator
+// edits are never clobbered.
+func (d *DB) backfillSeedTextEnglish() {
+	if v, _, _ := d.GetSetting("seed_text_en_v1"); v == "done" {
+		return
+	}
+	for _, r := range defaultInterceptRuleSeeds {
+		// match the old-language builtin row by its (unchanged) pattern + [内置] prefix
+		d.Exec(`UPDATE intercept_rules SET name=$1, message=$2 WHERE pattern=$3 AND name LIKE '[内置]%'`, //nolint:errcheck
+			r.name, r.message, r.pattern)
+	}
+	d.Exec(`UPDATE mcp_servers SET description=$1 WHERE name='filesystem' AND description ~ '[一-鿿]'`, //nolint:errcheck
+		`Read and write the local filesystem — store payloads, script output, discovered config files, etc. during pentesting`)
+	d.Exec(`UPDATE mcp_servers SET description=$1 WHERE name='github' AND description ~ '[一-鿿]'`, //nolint:errcheck
+		`GitHub repository recon — search public repos for leaked credentials, keys, or sensitive config, or analyze the target organization's open-source code (requires a GITHUB_PERSONAL_ACCESS_TOKEN on the MCP page to enable)`)
+	d.Exec(`UPDATE rbac_users SET display_name='Administrator' WHERE username='admin' AND display_name='管理员'`) //nolint:errcheck
+	_ = d.SetSetting("seed_text_en_v1", "done")
 }
