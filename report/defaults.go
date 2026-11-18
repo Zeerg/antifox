@@ -4,7 +4,7 @@ package report
 // neutral), in three locales: zh-CN | zh-TW | en-US. The delivery conventions
 // (personnel, PTES process, ~56-item test checklist, tools, standards) are
 // fixed; the AI only writes the narrative prose. Company name / personnel are
-// user-configured in 报告管理; these are locale-aware fallbacks.
+// user-configured in report management; these are locale-aware fallbacks.
 //
 // Selector functions (methodologyIntro/methodology/tools/standards/checklist/
 // defaultPersonnel) project the requested locale; build.go calls them with the
@@ -15,7 +15,7 @@ type kv struct {
 	Desc string `json:"desc"`
 }
 
-// checklistItem is one row of the 2.3 测试清单 (already localized).
+// checklistItem is one row of the 2.3 test checklist (already localized).
 type checklistItem struct {
 	Category string `json:"category"`
 	Name     string `json:"name"`
@@ -23,7 +23,7 @@ type checklistItem struct {
 }
 
 // ---------------------------------------------------------------------------
-// 2.1 测试人员信息 — neutral, brand-free fallbacks (no contact). Overridden by
+// 2.1 tester info — neutral, brand-free fallbacks (no contact). Overridden by
 // user-configured personnel in report settings.
 // ---------------------------------------------------------------------------
 func defaultPersonnel(loc string) []map[string]string {
@@ -47,7 +47,7 @@ func defaultPersonnel(loc string) []map[string]string {
 }
 
 // ---------------------------------------------------------------------------
-// 2.2 测试流程 (PTES 8 phases)
+// 2.2 test process (PTES 8 phases)
 // ---------------------------------------------------------------------------
 func methodologyIntro(loc string) string {
 	return pick(loc,
@@ -95,7 +95,7 @@ func methodology(loc string) []kv {
 }
 
 // ---------------------------------------------------------------------------
-// 2.4 测试工具
+// 2.4 test tools
 // ---------------------------------------------------------------------------
 func tools(loc string) []kv {
 	switch normLocale(loc) {
@@ -133,7 +133,7 @@ func tools(loc string) []kv {
 }
 
 // ---------------------------------------------------------------------------
-// 2.5 参考规范
+// 2.5 reference standards
 // ---------------------------------------------------------------------------
 func standards(loc string) []string {
 	switch normLocale(loc) {
@@ -168,9 +168,9 @@ func standards(loc string) []string {
 }
 
 // ---------------------------------------------------------------------------
-// 2.3 测试清单 (~56 items). checklistRow holds all three locales; checklist(loc)
+// 2.3 test checklist (~56 items). checklistRow holds all three locales; checklist(loc)
 // projects the requested one. AI-returned checklist_hits are matched against the
-// localized Name (see buildChecklist) → matched rows render 不通过 (red bold).
+// localized Name (see buildChecklist) → matched rows render as "fail" (red bold).
 // ---------------------------------------------------------------------------
 type checklistRow struct {
 	CatCN, CatTW, CatEN    string

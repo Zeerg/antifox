@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AntiFox 渗透测试报告构建器（JSON 驱动，自包含）。
+AntiFox penetration-test report builder (JSON-driven, self-contained).
 
-基于 python-docx 的交付级排版能力，通用化为命令行工具：
+A deliverable-grade layout engine on python-docx, generalized as a CLI tool:
     python3 report_builder.py <input.json> <output.docx>
 
-输入 JSON 由平台（Go 侧）组装：确定性骨架 + AI 生成的专业叙述。
-产出与人工交付一致的 .docx：封面(logo+橙线)、自动目录、页码域、
-每漏洞 3 行属性表 + 7 子项、代码块底色、表格浅蓝表头、宋体 10.5/1.5 倍行距首行缩进。
+The input JSON is assembled by the platform (Go side): deterministic skeleton +
+AI-generated professional narrative. Produces a .docx matching a manual
+deliverable: cover (logo + orange rule), auto TOC, page-number fields, a 3-row
+attribute table + 7 subsections per vulnerability, shaded code blocks, light-
+blue table headers, body font 10.5pt / 1.5x line spacing / first-line indent.
 
-无第三方品牌硬编码——公司名/logo 全部来自 JSON。
+No third-party branding is hardcoded — company name/logo all come from JSON.
 """
 import sys
 import json
@@ -32,7 +34,7 @@ HEADER_SHADE = "D9E2F3"                    # table header light blue
 CODE_BG = "F5F5F5"                         # code block background
 GRAY_BORDER = "808080"
 CAPTION_GRAY = RGBColor(0x40, 0x40, 0x40)
-HIT_RED = RGBColor(0xC0, 0x39, 0x2B)       # checklist "不通过"
+HIT_RED = RGBColor(0xC0, 0x39, 0x2B)       # checklist "fail"
 
 BODY_FONT = "宋体"
 UI_FONT = "微软雅黑"
@@ -276,7 +278,7 @@ def add_heading(doc, text, level):
 def add_body_text(doc, text, size_pt=10.5):
     p = doc.add_paragraph()
     pf = p.paragraph_format
-    pf.first_line_indent = Pt(size_pt * 2)   # 首行缩进 2 字
+    pf.first_line_indent = Pt(size_pt * 2)   # first-line indent, 2 chars
     pf.line_spacing = 1.5
     pf.space_after = Pt(3)
     r = p.add_run(text)
@@ -324,7 +326,7 @@ def add_code_block(doc, code):
         if i > 0:
             p.add_run().add_break()
         r = p.add_run(line if line else ' ')
-        # ASCII monospace, CJK falls back to 宋体
+        # ASCII monospace, CJK falls back to the CJK font
         set_cn_font(r, font=CODE_FONT, size_pt=9)
         r._element.get_or_add_rPr().find(qn('w:rFonts')).set(qn('w:eastAsia'), BODY_FONT)
 
@@ -574,7 +576,7 @@ def build_cover(doc, meta):
         add_paragraph(doc)
 
     title = meta.get('report_title') or (meta.get('client_name', '') + L(meta, "report_word"))
-    # split into subject / "渗透测试报告" if it ends with the report word
+    # split into subject / report word if the title ends with it
     rw = L(meta, "report_word")
     if title.endswith(rw) and len(title) > len(rw):
         subject = title[:-len(rw)]
@@ -651,7 +653,7 @@ def build_ch1(doc, data, meta):
     items = data.get('summary', {}).get('remediation_items', [])
     if items:
         add_caption(doc, L(meta, "tbl_remediation"))
-        rows = [[str(it.get('idx', i + 1)), it.get('object', ''), it.get('conclusion', '待修复'),
+        rows = [[str(it.get('idx', i + 1)), it.get('object', ''), it.get('conclusion', 'Pending'),
                  it.get('remark', '')] for i, it in enumerate(items)]
         C = WD_ALIGN_PARAGRAPH.CENTER
         build_table(doc, L(meta, "hdr_remediation"), rows, [1.2, 8.0, 2.5, 3.0],
@@ -678,7 +680,7 @@ def build_ch2(doc, data, meta):
     add_heading(doc, L(meta, "s23"), 2)
     add_caption(doc, L(meta, "tbl_checklist"))
     build_checklist(doc, data.get('checklist', []), meta)
-    # 2.4 测试工具 / 2.5 参考规范 已按交付规范精简，不再输出。
+    # 2.4 test tools / 2.5 reference standards trimmed per the delivery spec — no longer emitted.
     add_page_break(doc)
 
 
@@ -710,7 +712,7 @@ def build_ch3(doc, data, meta):
     vl = data.get('vuln_list', [])
     if vl:
         add_caption(doc, L(meta, "tbl_vulnlist"))
-        rows = [[v.get('severity', ''), v.get('name', ''), v.get('desc', ''), v.get('status', '待修复')] for v in vl]
+        rows = [[v.get('severity', ''), v.get('name', ''), v.get('desc', ''), v.get('status', 'Pending')] for v in vl]
         C = WD_ALIGN_PARAGRAPH.CENTER
         build_table(doc, L(meta, "hdr_vulnlist"), rows, [1.6, 4.6, 8.0, 1.3],
                     col_aligns=[C, WD_ALIGN_PARAGRAPH.LEFT, WD_ALIGN_PARAGRAPH.LEFT, C])
@@ -723,7 +725,7 @@ def build_ch3(doc, data, meta):
 
 
 def fmt_cvss(cvss):
-    """CVSS score as a clean 1-decimal string ('9.8')—float32→float64 存储噪声(9.800000190734863)归一。"""
+    """CVSS score as a clean 1-decimal string ('9.8') — normalizes float32→float64 storage noise (9.800000190734863)."""
     try:
         return f"{round(float(cvss), 1)}"
     except (TypeError, ValueError):
@@ -745,17 +747,17 @@ def build_vuln(doc, v, meta):
     add_heading(doc, vuln_heading_text(meta, v.get('sec_no', ''), v.get('title', ''), sev, cvss), 3)
     add_vuln_info_table(doc, meta, v.get('target', ''), sev, v.get('found_date', ''))
 
-    # 1. 漏洞描述
+    # 1. description
     add_paragraph(doc, L(meta, "sub_desc"), font=UI_FONT, size_pt=11, bold=True, space_before=6, space_after=2)
     for para in as_list(v.get('description')):
         add_body_text(doc, para)
     # 2. URL
     add_paragraph(doc, L(meta, "sub_url"), font=UI_FONT, size_pt=11, bold=True, space_before=6, space_after=2)
     add_body_text(doc, v.get('url') or v.get('target') or '')
-    # 3. 所属模块
+    # 3. module
     add_paragraph(doc, L(meta, "sub_module"), font=UI_FONT, size_pt=11, bold=True, space_before=6, space_after=2)
     add_body_text(doc, v.get('module') or '—')
-    # 4. 测试过程
+    # 4. test process
     add_paragraph(doc, L(meta, "sub_process"), font=UI_FONT, size_pt=11, bold=True, space_before=6, space_after=2)
     for block in as_list(v.get('test_process')):
         if not isinstance(block, dict):
@@ -768,15 +770,15 @@ def build_vuln(doc, v, meta):
             add_picture(doc, block.get('path', ''), caption=block.get('caption'))
         else:
             add_body_text(doc, block.get('content', ''))
-    # 5. 风险分析
+    # 5. risk analysis
     add_paragraph(doc, L(meta, "sub_risk"), font=UI_FONT, size_pt=11, bold=True, space_before=6, space_after=2)
     for i, item in enumerate(as_list(v.get('risk_analysis')), 1):
         add_list_item(doc, item, number=i)
-    # 6. 修复建议
+    # 6. remediation
     add_paragraph(doc, L(meta, "sub_fix"), font=UI_FONT, size_pt=11, bold=True, space_before=6, space_after=2)
     for i, item in enumerate(as_list(v.get('remediation')), 1):
         add_list_item(doc, item, number=i)
-    # 7. 修复情况
+    # 7. remediation status
     add_paragraph(doc, L(meta, "sub_status"), font=UI_FONT, size_pt=11, bold=True, space_before=6, space_after=2)
     add_body_text(doc, v.get('fix_status') or '—')
 
@@ -842,7 +844,7 @@ def _all_vulns(data):
 def build(data, output_path):
     meta = data.get('meta', {})
     if not meta.get('date'):
-        meta['date'] = datetime.date.today().strftime('%Y年%m月%d日')
+        meta['date'] = datetime.date.today().strftime('%Y-%m-%d' if meta.get('locale') == 'en-US' else '%Y年%m月%d日')
     doc = Document()
     # A4
     sec = doc.sections[0]

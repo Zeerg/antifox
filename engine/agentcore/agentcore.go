@@ -436,8 +436,10 @@ func (s *Session) Prompt(ctx context.Context, input string) iter.Seq2[harness.Ev
 	if s.writer != nil {
 		s.writer.RecordMessage(userMsg, llm.Usage{})
 	}
-	// 不论是否落盘都带上本会话 id：自定义会话头(agent.sessionHeaderTransport)从这里取值，
-	// 不挂 transcript 的会话(如连接测试)也要能带上。未配会话头时不会发送。
+	// Attach this session's id whether or not the transcript is persisted: the
+	// custom session header (agent.sessionHeaderTransport) reads it here, and
+	// sessions without a transcript (e.g. connectivity tests) must carry it too.
+	// Not sent when no session header is configured.
 	ctx = transcript.WithSessionID(ctx, s.sessionID)
 	var reminderExtra string
 	if s.opts.SystemReminderFunc != nil {

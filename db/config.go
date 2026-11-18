@@ -13,7 +13,7 @@ type LLMProfile struct {
 	Name          string  `json:"name"`
 	Format        string  `json:"format"`
 	BaseURL       string  `json:"base_url,omitempty"`
-	Proxy         string  `json:"proxy,omitempty"` // LLM 出站代理(http/https/socks5);空=用环境变量
+	Proxy         string  `json:"proxy,omitempty"` // outbound proxy for LLM (http/https/socks5); empty = env vars
 	Model         string  `json:"model"`
 	APIKey        string  `json:"-"` // never serialized to UI
 	APIKeyHint    string  `json:"api_key_hint,omitempty"`
@@ -22,17 +22,20 @@ type LLMProfile struct {
 	// ContextWindowK is the model's context window in K tokens, used to size
 	// compaction thresholds. 0 = use a 200K default; capped at 1000 (1M).
 	ContextWindowK int `json:"context_window_k"`
-	// ReasoningEffort is the thinking-mode selector. "" = 默认(不发送思考参数);
-	// "off" = 显式关闭(thinking.type=disabled); "low"/"medium"/"high"/"max" =
-	// 开启思考并设强度. Mapped to the provider request in agent.Config.NewProvider.
+	// ReasoningEffort is the thinking-mode selector. "" = default (no thinking param sent);
+	// "off" = explicitly disabled (thinking.type=disabled); "low"/"medium"/"high"/"max" =
+	// enabled with that level. Mapped to the provider request in agent.Config.NewProvider.
 	ReasoningEffort string `json:"reasoning_effort"`
 	IsDefault       bool   `json:"is_default"`
-	// LLM 轮询(故障转移)链：Priority 越大越靠前（激活配置永远居首，与 priority 无关）；
-	// PoolExclude=true 表示该配置不作为兜底目标（仍可被显式绑定/pin 使用）。
+	// LLM rotation (failover) chain: higher Priority comes earlier (the active
+	// profile always ranks first regardless of priority); PoolExclude=true means the
+	// profile is not a fallback target (it can still be explicitly bound/pinned).
 	Priority    int  `json:"priority"`
 	PoolExclude bool `json:"pool_exclude"`
-	// SessionHeaderKey, 非空时让每次 LLM 请求带一个自定义 HTTP 头(头名=该值、头值=当前会话
-	// session id)，供按 session 做提示缓存/粘性路由的网关(如 opencode zen)。空=不发送。
+	// SessionHeaderKey, when non-empty, makes every LLM request carry a custom HTTP
+	// header (name = this value, value = the current conversation session id), for
+	// gateways doing per-session prompt caching / sticky routing (e.g. opencode zen).
+	// Empty = not sent.
 	SessionHeaderKey string `json:"session_header_key,omitempty"`
 }
 
@@ -91,10 +94,10 @@ func (d *DB) ActiveProfile() (*LLMProfile, error) {
 	return &p, err
 }
 
-// ReportRoleProfile returns the LLM profile bound to the 报告富化/report role (setting
+// ReportRoleProfile returns the LLM profile bound to the report-enrichment role (setting
 // llm_role_report = profile id), or the globally-active profile when unbound/invalid.
 // Lets the user route report/enrichment to a stronger model (e.g. Claude) without
-// touching the pentest agents' models — part of "角色分工". Carries the api key.
+// touching the pentest agents' models — part of role-based model assignment. Carries the api key.
 func (d *DB) ReportRoleProfile() (*LLMProfile, error) {
 	if id := d.GetInt("llm_role_report", 0); id > 0 {
 		if p, _ := d.ProfileByID(int64(id)); p != nil && p.APIKey != "" {
@@ -170,17 +173,17 @@ type Agent struct {
 	Role             string `json:"role"`
 	Builtin          bool   `json:"builtin"`
 	Enabled          bool   `json:"enabled"`
-	MaxTurns         int    `json:"max_turns"`         // 单次运行最大轮次;0=不限制
-	RunSecs          int    `json:"run_seconds"`       // worker 单次运行墙钟上限(秒);0=不限制
-	WebSearch        bool   `json:"web_search"`        // 是否启用网络搜索(受系统全局开关门控)
-	InteractiveShell bool   `json:"interactive_shell"` // 是否启用交互式 shell(持久 PTY 会话工具族)
-	WrapupPrompt     string `json:"wrapup_prompt"`     // 收尾提示词(超时/步数耗尽时的 settlement 提示);空=用代码内置默认
-	WrapupMaxTurns   int    `json:"wrapup_max_turns"`  // 收尾阶段自身的轮数预算;0=用代码内置默认(按 agent)
-	// 任务级超时收尾词(与 per-run 两套;仅 worker/planner 用);空/0=用代码内置默认。
+	MaxTurns         int    `json:"max_turns"`         // max turns per run; 0 = unlimited
+	RunSecs          int    `json:"run_seconds"`       // worker per-run wall-clock cap (seconds); 0 = unlimited
+	WebSearch        bool   `json:"web_search"`        // enable web search (gated by the system-wide toggle)
+	InteractiveShell bool   `json:"interactive_shell"` // enable interactive shell (persistent PTY session tool family)
+	WrapupPrompt     string `json:"wrapup_prompt"`     // wrap-up prompt (settlement hint on timeout/step exhaustion); empty = code built-in default
+	WrapupMaxTurns   int    `json:"wrapup_max_turns"`  // turn budget for the wrap-up phase itself; 0 = code built-in default (per agent)
+	// task-level timeout wrap-up text (a separate set from per-run; worker/planner only); empty/0 = code built-in default.
 	TaskTimeoutWrapupPrompt   string `json:"task_timeout_wrapup_prompt"`
 	TaskTimeoutWrapupMaxTurns int    `json:"task_timeout_wrapup_max_turns"`
 	// LLMProfileID binds this agent (role) to a specific LLM profile — the basis for
-	// planner-strong / worker-weak 分级. 0 = no binding (use the global active profile).
+	// planner-strong / worker-weak tiering. 0 = no binding (use the global active profile).
 	LLMProfileID int64 `json:"llm_profile_id"`
 }
 
@@ -193,7 +196,7 @@ func scanAgent(sc interface{ Scan(...any) error }) (*Agent, error) {
 }
 
 // SetAgentLLMProfile binds a role to an LLM profile (id<=0 clears the binding → the
-// role falls back to the global active profile). Powers planner-strong/worker-weak 分级.
+// role falls back to the global active profile). Powers planner-strong/worker-weak tiering.
 func (d *DB) SetAgentLLMProfile(key string, id int64) error {
 	if id <= 0 {
 		_, err := d.Exec(`UPDATE agents SET llm_profile_id=NULL WHERE key=$1`, key)
@@ -234,7 +237,7 @@ func (d *DB) GetAgentByKey(key string) (*Agent, error) {
 // AgentBindingCounts returns per-agent binding counts in a few grouped queries
 // (NO N+1): visible MCP servers and skills keyed by agent id, and bound tools
 // keyed by agent key (tools.agents is a JSONB array of agent keys). Missing keys
-// mean zero. Used to show "MCP N · Skill N · 工具 N" on the agent cards.
+// mean zero. Used to show "MCP N · Skill N · tools N" on the agent cards.
 func (d *DB) AgentBindingCounts() (mcp map[int64]int, skill map[int64]int, tools map[string]int, err error) {
 	mcp, skill, tools = map[int64]int{}, map[int64]int{}, map[string]int{}
 	byID := func(q string, into map[int64]int) error {
@@ -324,7 +327,7 @@ func (d *DB) SetAgentWebSearch(key string, on bool) error {
 }
 
 // SetAgentInteractiveShell toggles whether an agent gets the interactive shell
-// (持久 PTY 会话) tool family + Bash 提示词联动(见 docs/交互式shell设计.md §14.2).
+// (persistent PTY session) tool family + Bash prompt interaction (see the interactive-shell design doc §14.2).
 func (d *DB) SetAgentInteractiveShell(key string, on bool) error {
 	_, err := d.Exec(`UPDATE agents SET interactive_shell=$1 WHERE key=$2`, on, key)
 	return err
@@ -407,14 +410,14 @@ func (d *DB) SeedPromptIfEmpty(agentID int64, tmpl string) error {
 	if cur.Valid {
 		return nil // already seeded or user-edited → leave it
 	}
-	_, err := d.SavePrompt(agentID, tmpl, "内置默认", "system")
+	_, err := d.SavePrompt(agentID, tmpl, "built-in default", "system")
 	return err
 }
 
 // ResetPromptToDefault appends the code-default template as a new version and
-// points current at it — the explicit "恢复为内置默认" action.
+// points current at it — the explicit "restore built-in default" action.
 func (d *DB) ResetPromptToDefault(agentID int64, tmpl string) (int, error) {
-	return d.SavePrompt(agentID, tmpl, "恢复为内置默认", "system")
+	return d.SavePrompt(agentID, tmpl, "restore built-in default", "system")
 }
 
 // SavePrompt appends a new version and points current_prompt_id at it.
@@ -477,7 +480,7 @@ type MCPServer struct {
 	Description    string          `json:"description,omitempty"`
 	TimeoutSeconds int             `json:"timeout_seconds"`
 	Enabled        bool            `json:"enabled"`
-	Status         string          `json:"status,omitempty"`      // '' | 'ok' | 'error'
+	Status         string          `json:"status,omitempty"` // '' | 'ok' | 'error'
 	StatusAt       *time.Time      `json:"status_at,omitempty"`
 	StatusError    string          `json:"status_error,omitempty"`
 	Tools          []string        `json:"tools,omitempty"` // cached tool names (mcp_tools_cache)
@@ -574,19 +577,27 @@ ON CONFLICT (server_id, tool_name) DO UPDATE SET description=EXCLUDED.descriptio
 
 func (d *DB) SaveMCP(m *MCPServer) (int64, error) {
 	args, env, hdrs := string(m.Args), string(m.Env), string(m.Headers)
-	if args == "" { args = "[]" }
+	if args == "" {
+		args = "[]"
+	}
 	if m.ID == 0 {
-		if env == "" || env == "null" { env = "{}" }
-		if hdrs == "" || hdrs == "null" { hdrs = "{}" }
+		if env == "" || env == "null" {
+			env = "{}"
+		}
+		if hdrs == "" || hdrs == "null" {
+			hdrs = "{}"
+		}
 		var id int64
 		err := d.QueryRow(`INSERT INTO mcp_servers(name,transport,command,args,env,headers,url,description,timeout_seconds,enabled)
 			VALUES ($1,$2,NULLIF($3,''),$4,$5,$6,NULLIF($7,''),$8,$9,$10) RETURNING id`,
 			m.Name, m.Transport, m.Command, args, env, hdrs, m.URL, m.Description, m.TimeoutSeconds, m.Enabled).Scan(&id)
 		return id, err
 	}
-	// 列表接口不再回显 env/headers（防 viewer 读明文凭据），故前端编辑传回空值。这里：
-	// 传了新值 → 用新值；连接要素（transport/command/args/url）未变 → 保留旧值；
-	// 连接要素变了却未传新值 → 清空（防止把旧凭据误发给改了的新目标）。
+	// The list API no longer echoes env/headers (so viewers can't read plaintext
+	// credentials), so the frontend sends back empty values when editing. Here:
+	// new value passed → use it; connection fields (transport/command/args/url)
+	// unchanged → keep the old values; connection fields changed but no new values
+	// passed → clear them (prevents leaking old credentials to a changed target).
 	_, err := d.Exec(`UPDATE mcp_servers SET name=$1,transport=$2,command=NULLIF($3,''),args=$4,
 		env=CASE WHEN $5 <> '' AND $5 <> 'null' THEN $5::jsonb
 			WHEN transport=$2 AND COALESCE(command,'')=$3 AND args=$4::jsonb AND COALESCE(url,'')=$7 THEN env ELSE '{}'::jsonb END,

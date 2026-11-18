@@ -19,15 +19,15 @@ import (
 
 // reAntiFoxDataPath / reVarFolders match PLATFORM-INTERNAL scratch paths only — the
 // dataDir family (…/antifox…data/…, e.g. verify/full_poc.py) and macOS temp — so client
-// reports don't leak them. Target-server paths in findings (LFI /etc/passwd 等) are NOT
+// reports don't leak them. Target-server paths in findings (e.g. LFI /etc/passwd) are NOT
 // touched (they're legitimate vuln content, no antifox-data marker / not /var/folders).
 var (
 	reAntiFoxDataPath = regexp.MustCompile(`/[^\s，、；;）")']*antifox[^\s，、；;）")']*data[^\s，、；;）")']*`)
-	reVarFolders     = regexp.MustCompile(`(?:/private)?/var/folders/[^\s，、；;）")']+`)
+	reVarFolders      = regexp.MustCompile(`(?:/private)?/var/folders/[^\s，、；;）")']+`)
 )
 
 // redactInternalPaths collapses the platform's own absolute scratch paths to a bare
-// filename so a client deliverable never shows "证据脚本：/…/antifox-data/verify/x.py".
+// filename so a client deliverable never shows "evidence script: /…/antifox-data/verify/x.py".
 func redactInternalPaths(s, dataDir string) string {
 	strip := func(m string) string { return filepath.Base(m) }
 	if d := strings.TrimSpace(dataDir); d != "" {
@@ -50,7 +50,7 @@ func redactLines(in []string, dataDir string) []string {
 
 // FindingInput is one confirmed finding, flattened from a graph node.
 type FindingInput struct {
-	NodeID     int64  // exploration 节点 id：用于加载该漏洞的证据截图(finding_evidence)
+	NodeID     int64 // exploration node id: used to load the finding's evidence screenshots (finding_evidence)
 	VulnClass  string
 	Severity   string // high|medium|low|critical|info
 	Summary    string
@@ -58,20 +58,20 @@ type FindingInput struct {
 	Target     string
 	Transcript string // real work transcript that produced this finding (tool calls/requests/responses/analysis); grounds enrichment in what actually happened instead of expanding the one-line summary. Empty = enrich from summary/PoC only.
 	// SetupContext holds the target's REAL account-registration / login / OTP / captcha
-	// request packets pulled from recorded traffic, so the 前置条件 can spell out
+	// request packets pulled from recorded traffic, so the prerequisites section can spell out
 	// "how to register a test account / log in" with verbatim packets — not an AI guess.
 	SetupContext string
-	// Reproduction is the STRUCTURED 复现过程 the agent recorded in-situ at report_finding
+	// Reproduction is the STRUCTURED reproduction the agent recorded in-situ at report_finding
 	// time (entry_point / prerequisites / verbatim steps / provenance). When present it
 	// is the authoritative, real reproduction — rendered directly into test_process and
 	// the AI is told to skip reconstructing it (saves tokens + can't fabricate). Empty =
 	// fall back to AI-reconstructed test_process / PoC.
 	Reproduction json.RawMessage
 	CreatedAt    time.Time
-	Enrichment *Enrichment // pre-loaded persisted enrichment; when set the AI call is skipped
+	Enrichment   *Enrichment // pre-loaded persisted enrichment; when set the AI call is skipped
 }
 
-// Reproduction is the structured 复现过程 captured in-situ by the agent (mirrors the
+// Reproduction is the structured reproduction captured in-situ by the agent (mirrors the
 // report_finding `reproduction` tool schema). Rendered verbatim into the report's
 // test_process so a human can reproduce from zero.
 type Reproduction struct {
@@ -92,7 +92,7 @@ type ReproStep struct {
 	ExchangeID string `json:"exchange_id,omitempty"`
 }
 
-// PersonInput is one 测试人员 row from report settings.
+// PersonInput is one tester row from report settings.
 type PersonInput struct {
 	Name    string `json:"name"`
 	Role    string `json:"role"`
@@ -102,11 +102,11 @@ type PersonInput struct {
 // GenInput is everything the report needs. The handler builds it from the task
 // + org-level report settings.
 type GenInput struct {
-	CompanyName   string // 报告出具方
+	CompanyName   string // report issuer
 	CompanyNameEn string
 	ClientName    string
-	ProjectName   string // 短项目名(封面/标题用)——绝不塞整段目标清单
-	Scope         string // 完整测试范围/目标系统描述(仅喂 AI 叙述做上下文，不上封面)
+	ProjectName   string // short project name (cover/title) — never the full target list
+	Scope         string // full scope/target-system description (AI-narrative context only, never on the cover)
 	ReportTitle   string
 	Version       string
 	Locale        string
@@ -149,10 +149,13 @@ func BuildDoc(ctx context.Context, pg *db.DB, in *GenInput) *reportDoc {
 		Standards:        sk.Standards,
 	}
 
-	// --- AI: report-level narrative only (背景/服务结果/整改结论；有兜底，永不空白) ---
-	// 每条漏洞的正文(描述/风险/修复)一律复用【持久富化】：报告只收录已确认(=已富化)漏洞，
-	// 故生成时必有富化可用；无富化的漏洞(非正常路径)留空 Enrichment，assembleVuln 回退到
-	// 原始 summary/PoC。
+	// --- AI: report-level narrative only (background/service result/remediation
+	// conclusion; with a fallback so it's never blank) ---
+	// Every vulnerability's body (description/risk/remediation) reuses PERSISTED
+	// enrichment: reports only collect confirmed (= enriched) findings, so
+	// enrichment always exists at generation time; a finding without enrichment
+	// (abnormal path) leaves Enrichment empty and assembleVuln falls back to the
+	// raw summary/PoC.
 	var rl reportLevelOut
 	narr := make([]Enrichment, len(in.Findings))
 	{
@@ -160,7 +163,7 @@ func BuildDoc(ctx context.Context, pg *db.DB, in *GenInput) *reportDoc {
 		wg.Add(1)
 		go func() { defer wg.Done(); rl = aiReportLevel(ctx, pg, in, sk) }()
 		for i := range in.Findings {
-			if e := in.Findings[i].Enrichment; e != nil { // 复用持久富化
+			if e := in.Findings[i].Enrichment; e != nil { // reuse persisted enrichment
 				narr[i] = *e
 			}
 		}
@@ -206,7 +209,7 @@ func BuildDoc(ctx context.Context, pg *db.DB, in *GenInput) *reportDoc {
 		secIdx++
 		sd := systemDetail{Name: sectionSystemHeader(loc, secIdx, systemDisplayName(loc, g.target), g.target)}
 		for vi, gf := range g.findings {
-			evByStep := loadEvidenceByStep(pg, in.DataDir, gf.f.NodeID, loc) // 证据截图按步骤分组
+			evByStep := loadEvidenceByStep(pg, in.DataDir, gf.f.NodeID, loc) // evidence screenshots grouped by step
 			detail := assembleVuln(loc, gf.f, gf.enr, fmt.Sprintf("3.%d.%d", secIdx, vi+1), in.DataDir, evByStep)
 			sd.Vulns = append(sd.Vulns, detail)
 			remItems = append(remItems, remedyRow{
@@ -243,24 +246,24 @@ func assembleVuln(loc string, f FindingInput, enr Enrichment, secNo, dataDir str
 		d.Description = []string{f.Summary}
 	}
 	d.Module = defaultStr(enr.Module, "—")
-	// test_process priority: (1) 就地记录的结构化复现过程 (verbatim, authoritative — the
+	// test_process priority: (1) the structured reproduction recorded in-place (verbatim, authoritative — the
 	// agent recorded it while testing, so it can't be fabricated); (2) AI-reconstructed
 	// test_process; (3) raw PoC. Captured reproduction wins because it's the real thing.
 	if b := reproToBlocks(f.Reproduction, loc, evByStep); len(b) > 0 {
-		d.TestProcess = b // 结构化复现：证据已按步骤穿插其中
+		d.TestProcess = b // structured reproduction: evidence already interleaved per step
 	} else {
 		if len(enr.TestProcess) > 0 {
 			d.TestProcess = enr.TestProcess
 		} else if strings.TrimSpace(f.PoC) != "" {
 			d.TestProcess = proofToBlocks(f.PoC)
 		}
-		for _, k := range sortedIntKeys(evByStep) { // 非结构化复现：证据统一补在末尾
+		for _, k := range sortedIntKeys(evByStep) { // unstructured reproduction: evidence appended at the end
 			d.TestProcess = append(d.TestProcess, evByStep[k]...)
 		}
 	}
 	d.RiskAnalysis = enr.RiskAnalysis
 	d.Remediation = enr.Remediation
-	// 客户报告脱敏：把 AI 富化/PoC 里引用到的平台内部 scratch 路径收敛为文件名。
+	// customer-report scrubbing: collapse platform-internal scratch paths referenced in AI enrichment/PoC down to filenames.
 	d.Description = redactLines(d.Description, dataDir)
 	d.RiskAnalysis = redactLines(d.RiskAnalysis, dataDir)
 	d.Remediation = redactLines(d.Remediation, dataDir)
@@ -420,6 +423,7 @@ func worstSeverityAll(fs []FindingInput) string {
 	}
 	return worst
 }
+
 // ---- text utils ----
 
 func defaultStr(v, d string) string {
@@ -484,13 +488,18 @@ func cleanTitle(s string) string {
 	return s
 }
 
-// reproToBlocks renders the agent's structured 复现过程 (captured in-situ) into
-// ordered text/code procBlocks for the report's test_process: 来源 → 入口点 →
-// 前置条件 → 每步(说明 text + 真实请求 code) → 无需 AI 重建. Returns nil when the
+// reproToBlocks renders the agent's structured reproduction (captured in-situ)
+// into ordered text/code procBlocks for the report's test_process: provenance →
+// entry point → prerequisites → each step (note text + real request code) → no
+// AI rebuild needed. Returns nil when the
 // reproduction is absent or unparseable (caller falls back to AI/PoC).
-// reproToBlocks 把结构化复现过程展成有序 text/code/image 块。evByStep 是该漏洞的证据截图
-// 按步骤号(1..N；0=概览)分组的 image 块——【穿插】渲染：每一步的说明+请求+响应之后，紧跟该步证据图；
-// 未归属到步骤的证据(概览/越界)在末尾补上。evByStep 为 nil 时退化为纯文字复现(富化生成时用)。
+// reproToBlocks expands the structured reproduction into ordered
+// text/code/image blocks. evByStep holds this finding's evidence screenshots
+// grouped by step number (1..N; 0 = overview) as image blocks — INTERLEAVED
+// rendering: after each step's note+request+response, that step's evidence image
+// follows; evidence not assigned to a step (overview/out-of-range) is appended
+// at the end. nil evByStep degrades to text-only reproduction (used during
+// enrichment generation).
 func reproToBlocks(raw json.RawMessage, loc string, evByStep map[int][]procBlock) []procBlock {
 	if len(raw) < 3 { // ""/"{}" carry nothing
 		return nil
@@ -545,13 +554,13 @@ func reproToBlocks(raw json.RawMessage, loc string, evByStep map[int][]procBlock
 				addText(pick(loc, "响应：", "回應：", "Response:"))
 				addCode(st.Response)
 			}
-			if ev := evByStep[i+1]; len(ev) > 0 { // 穿插：该步证据图紧跟其后
+			if ev := evByStep[i+1]; len(ev) > 0 { // interleave: this step's evidence image follows
 				blocks = append(blocks, ev...)
 				used[i+1] = true
 			}
 		}
 	}
-	for _, k := range sortedIntKeys(evByStep) { // 概览(0) + 越界步骤的证据补在末尾
+	for _, k := range sortedIntKeys(evByStep) { // overview (0) + out-of-range step evidence appended at the end
 		if !used[k] {
 			blocks = append(blocks, evByStep[k]...)
 		}
@@ -559,7 +568,7 @@ func reproToBlocks(raw json.RawMessage, loc string, evByStep map[int][]procBlock
 	return blocks
 }
 
-// sortedIntKeys 返回 map 的 int 键升序切片（保证证据块渲染顺序确定）。
+// sortedIntKeys returns the map's int keys as an ascending slice (deterministic evidence-block ordering).
 func sortedIntKeys(m map[int][]procBlock) []int {
 	if len(m) == 0 {
 		return nil
@@ -572,8 +581,10 @@ func sortedIntKeys(m map[int][]procBlock) []int {
 	return ks
 }
 
-// loadEvidenceByStep 加载某漏洞的证据截图并按步骤号分组成 image 块；图注为空时自动补默认标注
-// （步骤N 证据 / 证据截图，多张追加序号），保证每张图在报告里都有说明文字。
+// loadEvidenceByStep loads a finding's evidence screenshots grouped by step
+// number into image blocks; blank captions get an automatic default label
+// ("Step N evidence" / "Evidence", numbered when multiple) so every image has
+// explanatory text in the report.
 func loadEvidenceByStep(pg *db.DB, dataDir string, nodeID int64, loc string) map[int][]procBlock {
 	if pg == nil || nodeID <= 0 {
 		return nil

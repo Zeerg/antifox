@@ -12,13 +12,16 @@ import (
 	"antifox/db"
 )
 
-// mdLeadNumRe 去掉系统标题里 DOCX 版式的章节号前缀（如 "3.1 "）——MD 是独立交付稿、自成 1 起编号。
+// mdLeadNumRe strips the DOCX-style section-number prefix from system titles (e.g. "3.1 ") — the MD deliverable is standalone and numbered from 1.
 var mdLeadNumRe = regexp.MustCompile(`^\d+(\.\d+)*\s+`)
 
-// BuildMarkdown 生成【交付标准】Markdown 报告正文 + 随附证据图清单(相对名→源磁盘路径)。
-// 版式对齐人工交付稿：信息头 → 按目标分组 → 每条漏洞(属性表 + 7 个编号小节) → 页脚。
-// 证据图以相对路径 assets/<name> 引用，由 GenerateMarkdownFile 打进同一个 zip（不再 base64 内嵌，
-// 保持 .md 干净、小巧、可在 Typora/VSCode 直接编辑，图片相对解析）。
+// BuildMarkdown generates a deliverable-grade Markdown report body + the
+// bundled evidence-image list (relative name → source disk path). Layout matches
+// a manual deliverable: info header → grouped by target → per-vulnerability
+// (attribute table + 7 numbered sections) → footer. Evidence images are
+// referenced as assets/<name> and packed into the same zip by
+// GenerateMarkdownFile (no base64 inlining — keeps the .md clean, small, and
+// editable in Typora/VSCode with relative image resolution).
 func BuildMarkdown(ctx context.Context, pg *db.DB, in *GenInput) (string, map[string]string) {
 	doc := BuildDoc(ctx, pg, in)
 	loc := doc.Meta.Locale
@@ -26,7 +29,7 @@ func BuildMarkdown(ctx context.Context, pg *db.DB, in *GenInput) (string, map[st
 	assets := map[string]string{}
 	var b strings.Builder
 
-	// ── 信息头 ──
+	// ── info header ──
 	b.WriteString("# " + doc.Meta.ReportTitle + "\n\n")
 	b.WriteString("> **" + L("出具方", "出具方", "Prepared by") + "**：" + doc.Meta.CompanyName + "  \n")
 	b.WriteString("> **" + L("报告日期", "報告日期", "Date") + "**：" + doc.Meta.Date +
@@ -62,18 +65,18 @@ func BuildMarkdown(ctx context.Context, pg *db.DB, in *GenInput) (string, map[st
 		vulnIdx := 0
 		for _, v := range sysd.Vulns {
 			vulnIdx++
-			// 标题：<sys>.<vuln> <name>（<severity>/CVSS分值<score>）——自成 1 起编号
+			// title: <sys>.<vuln> <name> (<severity>/CVSS <score>) — numbered from 1
 			paren := v.Severity
 			if v.CVSSScore > 0 {
 				paren += "/" + L("CVSS分值", "CVSS分值", "CVSS ") + fmt.Sprintf("%.1f", v.CVSSScore)
 			}
 			b.WriteString(fmt.Sprintf("### %d.%d %s（%s）\n\n", sysIdx, vulnIdx, v.Title, paren))
-			// 属性表
+			// attribute table
 			b.WriteString("| | |\n|---|---|\n")
 			b.WriteString("| **" + tTarget + "** | " + mdCell(nz(v.Target, v.URL)) + " |\n")
 			b.WriteString("| **" + tRisk + "** | **" + v.Severity + "** |\n")
 			b.WriteString("| **" + tDate + "** | " + v.FoundDate + " |\n\n")
-			// 1. 漏洞描述
+			// 1. description
 			b.WriteString("**1. " + s1 + "**\n\n")
 			for _, p := range v.Description {
 				b.WriteString(p + "\n\n")
@@ -81,10 +84,10 @@ func BuildMarkdown(ctx context.Context, pg *db.DB, in *GenInput) (string, map[st
 			// 2. URL
 			b.WriteString("**2. URL**\n\n")
 			b.WriteString(nz(v.URL, v.Target) + "\n\n")
-			// 3. 所属模块
+			// 3. module
 			b.WriteString("**3. " + s3 + "**\n\n")
 			b.WriteString(defaultStr(v.Module, "—") + "\n\n")
-			// 4. 测试过程（步骤文字 + 逐字请求/响应 + 证据截图）
+			// 4. test process (step text + verbatim requests/responses + evidence images)
 			b.WriteString("**4. " + s4 + "**\n\n")
 			for _, blk := range v.TestProcess {
 				switch blk.Type {
@@ -104,19 +107,19 @@ func BuildMarkdown(ctx context.Context, pg *db.DB, in *GenInput) (string, map[st
 					b.WriteString(blk.Content + "\n\n")
 				}
 			}
-			// 5. 风险分析
+			// 5. risk analysis
 			b.WriteString("**5. " + s5 + "**\n\n")
 			for _, r := range v.RiskAnalysis {
 				b.WriteString("- " + r + "\n")
 			}
 			b.WriteString("\n")
-			// 6. 修复建议
+			// 6. remediation
 			b.WriteString("**6. " + s6 + "**\n\n")
 			for _, r := range v.Remediation {
 				b.WriteString("- " + r + "\n")
 			}
 			b.WriteString("\n")
-			// 7. 修复情况
+			// 7. remediation status
 			b.WriteString("**7. " + s7 + "**\n\n")
 			b.WriteString(v.FixStatus + "\n\n")
 			b.WriteString("---\n\n")
@@ -128,31 +131,33 @@ func BuildMarkdown(ctx context.Context, pg *db.DB, in *GenInput) (string, map[st
 	return b.String(), assets
 }
 
-// GenerateMarkdownFile 生成 MD 交付包 zip（report.md + assets/ 证据图），返回 zip 路径。
-// 纯 Go、无 python 依赖；图片以真实文件随附、相对引用，解压后在 Typora/VSCode 直接可读可编辑。
+// GenerateMarkdownFile produces the MD deliverable zip (report.md + assets/
+// evidence images) and returns its path. Pure Go, no python dependency; images
+// ship as real files with relative references — readable/editable in
+// Typora/VSCode after unzipping.
 func GenerateMarkdownFile(ctx context.Context, pg *db.DB, in *GenInput, workDir, taskID string) (string, error) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		return "", fmt.Errorf("创建报告目录失败: %w", err)
+		return "", fmt.Errorf("failed to create report directory: %w", err)
 	}
 	md, assets := BuildMarkdown(ctx, pg, in)
 	zipPath := filepath.Join(workDir, fmt.Sprintf("task-%s-%s.zip", safeName(taskID), nowStamp(ctx)))
 	zf, err := os.Create(zipPath)
 	if err != nil {
-		return "", fmt.Errorf("创建报告包失败: %w", err)
+		return "", fmt.Errorf("failed to create report bundle: %w", err)
 	}
 	defer zf.Close()
 	zw := zip.NewWriter(zf)
 	mw, err := zw.Create("report.md")
 	if err != nil {
-		return "", fmt.Errorf("写入 report.md 失败: %w", err)
+		return "", fmt.Errorf("failed to write report.md: %w", err)
 	}
 	if _, err := mw.Write([]byte(md)); err != nil {
-		return "", fmt.Errorf("写入 report.md 失败: %w", err)
+		return "", fmt.Errorf("failed to write report.md: %w", err)
 	}
 	for rel, src := range assets {
 		data, err := os.ReadFile(src)
 		if err != nil {
-			continue // 图片缺失就跳过，不影响整包
+			continue // missing images are skipped without failing the bundle
 		}
 		aw, err := zw.Create("assets/" + rel)
 		if err != nil {
@@ -161,7 +166,7 @@ func GenerateMarkdownFile(ctx context.Context, pg *db.DB, in *GenInput, workDir,
 		_, _ = aw.Write(data)
 	}
 	if err := zw.Close(); err != nil {
-		return "", fmt.Errorf("打包失败: %w", err)
+		return "", fmt.Errorf("failed to build the bundle: %w", err)
 	}
 	return zipPath, nil
 }
@@ -174,14 +179,14 @@ func fileExists(p string) bool {
 	return err == nil
 }
 
-// mdCell 转义表格单元格里会破坏 markdown 表格的字符。
+// mdCell escapes characters that would break the markdown table cell.
 func mdCell(s string) string {
 	s = strings.ReplaceAll(s, "|", "\\|")
 	s = strings.ReplaceAll(s, "\n", " ")
 	return strings.TrimSpace(s)
 }
 
-// mdEscapeAlt 清理图片 alt 文本（去掉会破坏 ![]() 语法的字符）。
+// mdEscapeAlt sanitizes image alt text (removes characters that break ![]() syntax).
 func mdEscapeAlt(s string) string {
 	s = strings.ReplaceAll(s, "]", "")
 	s = strings.ReplaceAll(s, "\n", " ")

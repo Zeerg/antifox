@@ -39,7 +39,7 @@ func (s *Server) listCompanies(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	// task 过滤：只保留在该任务里拥有资产的企业（修"选任务后企业 tab 仍显示别任务企业"）。
+	// task filter: keep only enterprises that own assets in this task (fixes "the enterprise tab still shows other tasks' enterprises after a task is selected").
 	if taskID, _ := strconv.ParseInt(r.URL.Query().Get("task"), 10, 64); taskID > 0 {
 		if as := s.assetStore(); as != nil {
 			if ids, e := as.CompanyIDsForTask(taskID); e == nil {
@@ -301,7 +301,7 @@ func (s *Server) assetCounts(w http.ResponseWriter, r *http.Request) {
 	var counts map[string]int
 	var err error
 	if taskID, _ := strconv.ParseInt(r.URL.Query().Get("task"), 10, 64); taskID > 0 {
-		counts, err = as.CountsByTypeForTask(taskID) // 按任务缩：资产分布/徽章计数
+		counts, err = as.CountsByTypeForTask(taskID) // scoped to task: asset distribution / badge counts
 	} else {
 		counts, err = as.CountsByType()
 	}
@@ -356,8 +356,8 @@ func (s *Server) insertAssets(w http.ResponseWriter, r *http.Request) {
 		Assets []struct {
 			Type string `json:"type"`
 			// root_domain / subdomain
-			Domain      string `json:"domain"`
-			ICP         string `json:"icp"`
+			Domain      string   `json:"domain"`
+			ICP         string   `json:"icp"`
 			RecordType  string   `json:"record_type"`
 			RecordValue []string `json:"record_value"`
 			// ip

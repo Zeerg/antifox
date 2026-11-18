@@ -89,12 +89,12 @@ func (d *DB) GetKnowledgeConfig() (*KnowledgeConfig, error) {
 }
 
 // SaveKnowledgeConfig upserts the embedder config. Empty apiKey keeps the existing key.
-// ErrKnowledgeKeyRequired 表示「改了嵌入服务地址但没重输 API Key」——拒绝沿用旧密钥，
-// 防止 operator 把已有密钥转发到其控制的接收器。
-var ErrKnowledgeKeyRequired = errors.New("修改嵌入服务地址时需要重新输入 API Key")
+// ErrKnowledgeKeyRequired means "the embedder endpoint changed but no API key was re-entered" — refuse to reuse the old key,
+// preventing an operator from forwarding the existing key to a receiver they control.
+var ErrKnowledgeKeyRequired = errors.New("re-entering the API key is required when changing the embedder endpoint")
 
-// SaveKnowledgeConfig upserts the embedder config. 空 apiKey 仅在地址未变时沿用旧密钥；
-// 改了地址却留空密钥则返回 ErrKnowledgeKeyRequired（凭据必须重新输入并绑定新目标）。
+// SaveKnowledgeConfig upserts the embedder config. An empty apiKey reuses the old key only when the address is unchanged;
+// a changed address with an empty key returns ErrKnowledgeKeyRequired (credentials must be re-entered bound to the new target).
 func (d *DB) SaveKnowledgeConfig(enabled bool, baseURL, model, apiKey string, dim int) error {
 	if dim <= 0 {
 		dim = 1024
@@ -122,7 +122,7 @@ func (d *DB) SaveKnowledgeConfig(enabled bool, baseURL, model, apiKey string, di
 
 // AdoptKnowledgeKeyFromProfile copies an LLM profile's api_key into knowledge_config
 // when the embedder has no key yet — convenience for reusing a configured provider
-// (e.g. a 智谱 profile) as the embedder. No-op if a key is already set or the
+// (e.g. a Zhipu profile) as the embedder. No-op if a key is already set or the
 // profile has none. Returns whether a key was adopted.
 func (d *DB) AdoptKnowledgeKeyFromProfile(profileID int64) (bool, error) {
 	var res sql.Result

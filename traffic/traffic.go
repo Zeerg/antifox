@@ -58,7 +58,7 @@ const maxInlineBody = 256 * 1024
 const maxIndexBody = 64 * 1024
 
 // bodyFTSSchema is the trigram FTS5 index over DECODED request/response bodies,
-// powering "正文搜索" (human keyword search) AND step↔exchange correlation. It is a
+// powering "body search" (human keyword search) AND step↔exchange correlation. It is a
 // search aux keyed by exchange id (UNINDEXED, stored for retrieval); the exchanges
 // table stays the source of truth, so any stale id here is harmless (it just won't
 // join a real row). Created separately + guarded so a build lacking FTS5 degrades
@@ -107,14 +107,14 @@ func Open(dir, addr string) (*Traffic, error) {
 		return nil, err
 	}
 	t := &Traffic{dir: dir, addr: addr, db: db}
-	// Trigram body index (guarded): powers full-text 正文搜索 + step↔exchange
+	// Trigram body index (guarded): powers full-text body search + step↔exchange
 	// correlation. If FTS5 is unavailable we degrade to metadata-only search rather
 	// than refusing to open the store.
 	if _, err := db.Exec(bodyFTSSchema); err != nil {
-		log.Printf("[traffic] 正文索引(FTS5 trigram)不可用，降级为仅元数据搜索：%v", err)
+		log.Printf("[traffic] body index (FTS5 trigram) unavailable — degraded to metadata-only search: %v", err)
 	} else {
 		t.ftsOK = true
-		go t.backfillBodies() // 已有记录的正文补进索引（后台、不阻塞启动）
+		go t.backfillBodies() // backfill existing records' bodies into the index (background, non-blocking)
 	}
 
 	p, err := mproxy.NewProxy(&mproxy.Options{
@@ -202,8 +202,10 @@ func (t *Traffic) CACertPath() string {
 func (t *Traffic) Start() error { return t.proxy.Start() }
 
 func (t *Traffic) Close() error {
-	// 优雅关闭时显式 checkpoint WAL 落盘：WAL 对崩溃本就持久(下次打开重放)，但显式合并
-	// 可避免 WAL 无界增长，并保证主库文件始终是全量最新——外部备份/工具无需依赖重放即可读全。
+	// Explicit WAL checkpoint on graceful shutdown: WAL is crash-durable on its
+	// own (replayed on next open), but an explicit merge prevents unbounded WAL
+	// growth and keeps the main db file fully current — external backups/tools
+	// read everything without depending on replay.
 	_, _ = t.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	return t.db.Close()
 }
@@ -240,7 +242,7 @@ func (t *Traffic) maybePassthrough(f *mproxy.Flow, err error) {
 		return
 	}
 	if _, loaded := t.pass.LoadOrStore(host, struct{}{}); !loaded {
-		log.Printf("[traffic] 与 %s 的 MITM 出错，改为透传（该 host 后续直连目标、不再记录，但请求照常）：%v", host, err)
+		log.Printf("[traffic] MITM with %s errored — switching to passthrough (this host now goes direct and is no longer recorded; requests still flow): %v", host, err)
 	}
 }
 
@@ -300,7 +302,7 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 	t.wmu.Unlock()
 
 	// Full-text body index (decoded + capped). Stored bodies stay raw-on-wire; the
-	// index holds decoded text so "正文搜索" and step correlation work on readable
+	// index holds decoded text so "body search" and step correlation work on readable
 	// content. Separate so a disabled/absent FTS never blocks capture.
 	if t.ftsOK {
 		t.indexBody(id, decodedForIndex(f.Request.Body, f.Request.DecodedBody), decodedForIndex(f.Response.Body, f.Response.DecodedBody))
@@ -420,18 +422,21 @@ func (t *Traffic) Search(host string, page, size int) ([]ExchangeMeta, error) {
 // indexed metadata columns (host/url/method/content-type/status), together with
 // the total number of rows matching that filter (for the UI's pagination).
 // Newest first. Bodies are never included.
-// TrafficFilter 高级筛选条件。path/status/resp_len 走索引列；Body 走 FTS trigram
-// 正文索引（请求+响应解码后内容，≥3 字）。
+// TrafficFilter advanced filter criteria. path/status/resp_len use index
+// columns; Body uses the FTS trigram body index (decoded request+response
+// content, ≥3 chars).
 type TrafficFilter struct {
-	Path      string // 路径关键词（path/url LIKE）
-	StatusMin int    // 状态码区间下限（0=不限）
-	StatusMax int    // 状态码区间上限
-	RespMin   int    // 响应长度下限(字节，0=不限)
-	RespMax   int    // 响应长度上限(字节，0=不限)
-	Body      string // 正文关键词（请求/响应解码后全文，FTS trigram，≥3 字）
-	// 时间窗（Unix 秒，0=不限）。任务筛选用它把"该任务资产主机集"再按【任务活动时间窗】
-	// 收敛——流量无 task_id，仅按 host 圈会把同 host 的其它测试（如首次测试）也带进来；
-	// 叠加时间窗后，同一 host 上不同时间跑的两次测试就能干净分开。
+	Path      string // path keyword (path/url LIKE)
+	StatusMin int    // status-code range lower bound (0 = no limit)
+	StatusMax int    // status-code range upper bound
+	RespMin   int    // response-length lower bound (bytes, 0 = no limit)
+	RespMax   int    // response-length upper bound (bytes, 0 = no limit)
+	Body      string // body keyword (decoded request/response full text, FTS trigram, ≥3 chars)
+	// Time window (unix seconds, 0 = no limit). Task filtering uses it to narrow
+	// "this task's asset host set" by the task's ACTIVITY TIME WINDOW — traffic
+	// has no task_id, and host-only scoping would pull in other tests on the same
+	// host (e.g. the first run); with the time window overlaid, two tests on the
+	// same host at different times separate cleanly.
 	TsMin int64
 	TsMax int64
 }
@@ -514,7 +519,7 @@ func (t *Traffic) backfillBodies() {
 	if len(todo) == 0 {
 		return
 	}
-	log.Printf("[traffic] 正文索引回填开始：%d 条（最新优先）", len(todo))
+	log.Printf("[traffic] body-index backfill starting: %d entries (newest first)", len(todo))
 	const batch = 1000
 	type ent struct{ id, req, resp string }
 	done := 0
@@ -543,13 +548,13 @@ func (t *Traffic) backfillBodies() {
 		t.wmu.Unlock()
 		done = end
 		if done%20000 < batch {
-			log.Printf("[traffic] 正文索引回填进度：%d / %d", done, len(todo))
+			log.Printf("[traffic] body-index backfill progress: %d / %d", done, len(todo))
 		}
 	}
-	log.Printf("[traffic] 正文索引回填完成：%d 条", done)
+	log.Printf("[traffic] body-index backfill done: %d entries", done)
 }
 
-// conds 把高级筛选编译成 SQL 条件片段 + 参数（按出现顺序一一对应 ? 占位）。
+// conds compiles advanced filters into SQL condition fragments + args (order corresponds 1:1 to ? placeholders).
 func (f TrafficFilter) conds() (parts []string, args []any) {
 	if p := strings.TrimSpace(f.Path); p != "" {
 		parts = append(parts, "(path LIKE ? OR url LIKE ?)")
@@ -638,8 +643,9 @@ func (t *Traffic) Page(host, method, q string, filter TrafficFilter, page, size 
 	return rows, total, rs.Err()
 }
 
-// MetaByIDs 按 exchange id 批量取元数据（供漏洞"关联流量"展示；报文正文仍按需另取）。
-// 全参数化(? 占位)，保持传入顺序。
+// MetaByIDs batch-fetches metadata by exchange id (for a finding's "linked
+// traffic" display; packet bodies are fetched separately on demand). Fully
+// parameterized (? placeholders), input order preserved.
 func (t *Traffic) MetaByIDs(ids []string) ([]ExchangeMeta, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -740,7 +746,7 @@ func (t *Traffic) PageHosts(hosts []string, method, q string, filter TrafficFilt
 // 2xx/3xx/4xx/5xx) over the WHOLE store (not a 50-row page), so the dashboard's
 // status distribution is accurate. hosts empty ⇒ all exchanges (global); non-empty
 // ⇒ restricted to that host set (a task's asset hosts).
-// tsMin/tsMax (Unix 秒，0=不限) scope the counts to a task's activity window so the
+// tsMin/tsMax (unix seconds, 0 = no limit) scope the counts to a task's activity window so the
 // task stat card matches the paged, window-scoped view.
 func (t *Traffic) StatusCounts(hosts []string, tsMin, tsMax int64) (map[int]int, error) {
 	var conds []string
@@ -786,7 +792,7 @@ func (t *Traffic) StatusCounts(hosts []string, tsMin, tsMax int64) (map[int]int,
 // server used Content-Encoding (gzip/br/deflate/zstd) the stored body is the
 // compressed bytes, which render as garbage. We decode for VIEWING here — keeping
 // the original headers intact (so the real server behavior shows) but turning the
-// body into readable text, like Burp does. Benefits detail view, 截图模式, report
+// body into readable text, like Burp does. Benefits detail view, screenshot mode, report
 // enrichment and the traffic_get tool in one place.
 func (t *Traffic) Get(id string) (req, resp string, err error) {
 	var rel string
@@ -1245,14 +1251,14 @@ func (t *Traffic) Tools() []actool.CoreTool {
 
 	search := actool.Build(actool.Spec{
 		Name:        "traffic_search",
-		Description: "查询记录代理已抓取的目标流量（必须指定 host，可再按 URL 子串过滤）。仅返回极轻量索引(id/method/url/status/resp_len)，不含任何响应内容。默认只返回 3 条、每页最多 10 条；结果多时用 page 翻页（page=0 起）；要看某条的请求/响应原文用 traffic_get(id)。回看已访问资源、找端点先用它，避免重复 curl 同一 URL。",
+		Description: "Query target traffic captured by the recording proxy (host is required; optional URL substring filter). Returns only an ultra-light index (id/method/url/status/resp_len) — no response content. Default 3 results, max 10 per page; use page to paginate (page=0 first); use traffic_get(id) for an entry's request/response verbatim. Reach for this first when revisiting accessed resources or hunting endpoints — avoids re-curling the same URL.",
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"host":     map[string]any{"type": "string", "description": "按主机过滤（必填，如 '192.168.1.100:8082'）"},
-				"contains": map[string]any{"type": "string", "description": "URL 子串过滤（可选，如 'api' / 'login'）"},
-				"limit":    map[string]any{"type": "integer", "description": "每页条数，默认 3，最大 10"},
-				"page":     map[string]any{"type": "integer", "description": "页码，从 0 开始，默认 0（按 ts 倒序分页）"},
+				"host":     map[string]any{"type": "string", "description": "filter by host (required, e.g. '192.168.1.100:8082')"},
+				"contains": map[string]any{"type": "string", "description": "URL substring filter (optional, e.g. 'api' / 'login')"},
+				"limit":    map[string]any{"type": "integer", "description": "results per page, default 3, max 10"},
+				"page":     map[string]any{"type": "integer", "description": "page number starting at 0, default 0 (ts-descending pagination)"},
 			},
 			"required": []any{"host"},
 		},
@@ -1266,16 +1272,16 @@ func (t *Traffic) Tools() []actool.CoreTool {
 			}
 			_ = json.Unmarshal(in, &a)
 			if strings.TrimSpace(a.Host) == "" {
-				return actool.Errorf("host 为必填参数：请指定要查询的主机（如 '192.168.1.100:8082'），避免全库扫描。"), nil
+				return actool.Errorf("host is required: specify the host to query (e.g. '192.168.1.100:8082') to avoid a full-table scan."), nil
 			}
 			rows, err := t.query(a.Host, a.Contains, a.Page, a.Limit)
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
 			if len(rows) == 0 {
-				return actool.Text("无匹配流量。"), nil
+				return actool.Text("No matching traffic."), nil
 			}
-			// 精简为最小索引：仅保留定位所需字段 + 响应码/长度，不带任何响应内容。
+			// slim to the minimal index: keep only locating fields + status/length, no response content.
 			type liteRow struct {
 				ID      string `json:"id"`
 				Method  string `json:"method"`
@@ -1294,10 +1300,10 @@ func (t *Traffic) Tools() []actool.CoreTool {
 
 	get := actool.Build(actool.Spec{
 		Name:        "traffic_get",
-		Description: "按 id 取一条已抓流量的请求/响应原文（过大会截断）。配合 traffic_search 用，避免重复 curl。",
+		Description: "Fetch one captured exchange's request/response verbatim by id (truncated when too large). Pair with traffic_search to avoid repeated curls.",
 		Schema: map[string]any{
 			"type":       "object",
-			"properties": map[string]any{"id": map[string]any{"type": "string", "description": "traffic_search 返回的 id"}},
+			"properties": map[string]any{"id": map[string]any{"type": "string", "description": "id returned by traffic_search"}},
 			"required":   []any{"id"},
 		},
 		ReadOnly:    ro,
@@ -1324,5 +1330,5 @@ func clip(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	return s[:max] + fmt.Sprintf("\n... [截断，共 %d 字节；完整在流量文件树] ...", len(s))
+	return s[:max] + fmt.Sprintf("\n... [truncated, %d bytes total; full content in the traffic file tree] ...", len(s))
 }

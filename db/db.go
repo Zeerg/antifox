@@ -1,5 +1,5 @@
-// Package db is the PostgreSQL data source for AntiFox (取代旧 graph 单文件 SQLite)。
-// 它打开连接、应用 schema、并 seed 内置 agent 与变量目录。
+// Package db is the PostgreSQL data source for AntiFox (replacing the old single-file SQLite graph).
+// It opens the connection, applies the schema, and seeds built-in agents and the variable catalog.
 package db
 
 import (
@@ -18,7 +18,7 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-// 连接池上限（见 Open）。保守取值：单实例部署足够，又给 PG 其它客户端留余量。
+// Connection-pool cap (see Open). Conservative: enough for a single-instance deployment while leaving headroom for other PG clients.
 const (
 	maxOpenConns    = 25
 	maxIdleConns    = 10
@@ -82,9 +82,11 @@ func Open(dsn string) (*DB, error) {
 		sqlDB.Close()
 		return nil, fmt.Errorf("ping postgres (%s): %w", config.Redact(dsn), err)
 	}
-	// 连接池上限：限制并发占用的数据库连接，避免请求风暴耗尽连接导致查询失败。PG 默认
-	// max_connections=100，这里留足余量给其它客户端（psql/pg_dump/备份）；空闲连接回收
-	// 避免长驻，连接最长寿命防止网络层半死连接堆积。
+	// Connection-pool cap: limits concurrent database connections so a request storm
+	// can't exhaust them and fail queries. PG defaults to max_connections=100; leave
+	// ample room for other clients (psql/pg_dump/backups); idle connections are
+	// recycled instead of lingering, and a max connection lifetime prevents
+	// half-dead network connections from piling up.
 	sqlDB.SetMaxOpenConns(maxOpenConns)
 	sqlDB.SetMaxIdleConns(maxIdleConns)
 	sqlDB.SetConnMaxLifetime(connMaxLifetime)
@@ -119,40 +121,42 @@ func Open(dsn string) (*DB, error) {
 type builtinAgent struct {
 	key, name, role, desc string
 	vars                  []promptVar
-	interactiveShell      bool // 建行时的默认交互式 shell 开关；ON CONFLICT 不覆盖用户后续手动开关
-	runSeconds            *int // 建行时的单次 run 墙钟上限(秒)；nil=用表默认(600)，0=不限时
+	interactiveShell      bool // default interactive-shell flag at row creation; ON CONFLICT must not override the user's later manual toggle
+	runSeconds            *int // per-run wall-clock cap (seconds) at row creation; nil = table default (600), 0 = unlimited
 }
 
 type promptVar struct{ name, desc, example, source string }
 
-// intp 返回 v 的指针，用于给 builtinAgent 可选字段(如 runSeconds)显式取值。
+// intp returns a pointer to v, used to set builtinAgent optional fields (like runSeconds) explicitly.
 func intp(v int) *int { return &v }
 
-// builtinAgents mirrors docs §5(a). 内置工具不入库；这里只 seed agent + 变量目录。
-// 注：planner/worker/mainagent/auto 的交互式 shell 默认由下方 interactive_shell_default_v1
-// 块统一置 true（尊重后续 toggle）；这里的 interactiveShell 只给需要「建行即默认开」的新 agent。
+// builtinAgents mirrors docs §5(a). Built-in tools are not stored; only agents + the variable catalog are seeded here.
+// Note: planner/worker/mainagent/auto get their interactive-shell default set to
+// true uniformly by the interactive_shell_default_v1 block below (respecting later
+// toggles); the interactiveShell field here is only for new agents that must
+// default on at row creation.
 var builtinAgents = []builtinAgent{
-	{"goals", "目标拆解", "goals", "把渗透任务目标拆解成若干独立、可验证的子目标。", []promptVar{
-		{"EngagementDescription", "任务描述（测试对象/背景）", "测试 example.com 站点", "exploration"},
-		{"Now", "服务端当前时间(RFC3339)", "2026-06-25T00:00:00Z", "runtime"},
+	{"goals", "Goal Decomposition", "goals", "Breaks a pentest task goal into several independent, verifiable sub-goals.", []promptVar{
+		{"EngagementDescription", "task description (target/background)", "test the example.com site", "exploration"},
+		{"Now", "current server time (RFC3339)", "2026-06-25T00:00:00Z", "runtime"},
 	}, false, nil},
-	{"planner", "规划", "planner", "读取态势、判定目标，只在确有未覆盖的新方向时补充探索意图（每任务一个规划循环）。", []promptVar{
-		{"Goal", "任务总目标", "拿下 example.com 的管理员权限", "exploration"},
-		{"AssetSummary", "资产计数/类型分布摘要(可选)", "domain:3 ip:5 site:2", "distilled"},
+	{"planner", "Planner", "planner", "Reads the situation, judges goals, and adds exploration intents only when a genuinely uncovered new direction exists (one planning loop per task).", []promptVar{
+		{"Goal", "overall task goal", "gain admin privileges on example.com", "exploration"},
+		{"AssetSummary", "asset count/type distribution summary (optional)", "domain:3 ip:5 site:2", "distilled"},
 	}, false, nil},
-	{"mainagent", "主", "main", "人机接口：观察进展，把人的意图落成 hint 或高优先级意图。", []promptVar{
-		{"Goal", "当前任务目标", "拿下 example.com 的管理员权限", "exploration"},
-		{"AssetSummary", "开局态势摘要(可选)", "domain:3 ip:5", "distilled"},
-		{"FindingsSummary", "已确认漏洞摘要(可选)", "high:1 medium:2", "distilled"},
+	{"mainagent", "Main", "main", "Human-machine interface: watches progress, turns human intent into hints or high-priority intents.", []promptVar{
+		{"Goal", "current task goal", "gain admin privileges on example.com", "exploration"},
+		{"AssetSummary", "opening situation summary (optional)", "domain:3 ip:5", "distilled"},
+		{"FindingsSummary", "confirmed-findings summary (optional)", "high:1 medium:2", "distilled"},
 	}, false, nil},
-	{"worker", "执行", "worker", "领取一条意图执行，把发现的事实/漏洞写回知识图谱后停止。", []promptVar{
-		{"ProxyAddr", "记录代理地址(驱动 if 双文案)", "127.0.0.1:8080", "runtime"},
-		{"WorkerName", "worker 自我标识(可选)", "worker-1", "runtime"},
-	}, false, intp(1200)}, // worker 单轮墙钟默认 1200s（硬目标/慢网常超 600s；参考 AntiFox 0.3.3）
-	// Auto:内置「平台操作」agent。不参与渗透编排循环,经对话页驱动,用工具操作平台。
-	{"auto", "Auto", "assistant", "平台操作助手：用工具管理任务(建/看/暂停/给提示)与资产，并可创建/修改 skill、自定义工具、MCP。", nil, false, nil},
-	// 渗透测试:内置「独立渗透」agent。经对话页驱动,一人从侦察到收尾走完整条渗透链,自己规划自己执行自己验证。默认开启交互式 shell。
-	{"pentest", "渗透测试", "assistant", "独立渗透 agent：一人从侦察→找攻击面→深入利用→验证→收尾走完整条链，自己规划、自己执行、自己对抗式验证。", nil, true, intp(0)},
+	{"worker", "Worker", "worker", "Claims one intent, executes it, writes discovered facts/vulns back to the knowledge graph, then stops.", []promptVar{
+		{"ProxyAddr", "recording proxy address (drives the if/two-variant copy)", "127.0.0.1:8080", "runtime"},
+		{"WorkerName", "worker self-identifier (optional)", "worker-1", "runtime"},
+	}, false, intp(1200)}, // worker per-round wall-clock default 1200s (hard targets/slow networks often exceed 600s; ref AntiFox 0.3.3)
+	// Auto: built-in "platform operations" agent. Not part of the pentest orchestration loop; driven from the chat page, operates the platform via tools.
+	{"auto", "Auto", "assistant", "Platform-operations assistant: manages tasks (create/view/pause/hint) and assets via tools, and can create/modify skills, custom tools, and MCP servers.", nil, false, nil},
+	// pentest: built-in "standalone pentest" agent. Driven from the chat page; walks the full chain from recon to wrap-up alone — plans, executes, and verifies by itself. Interactive shell on by default.
+	{"pentest", "Pentest", "assistant", "Standalone pentest agent: single-handedly walks the whole chain recon → attack surface → deep exploitation → verification → wrap-up; plans, executes, and adversarially verifies on its own.", nil, true, intp(0)},
 }
 
 // seedBuiltins inserts the fixed built-in agents and their variable catalog (idempotent).
@@ -205,7 +209,7 @@ ON CONFLICT (name) DO NOTHING`,
 	// filesystem: read/write files during pentest (payloads, output, configs).
 	if _, err := d.Exec(`
 INSERT INTO mcp_servers(name, transport, command, args, env, enabled, description)
-VALUES ('filesystem', 'stdio', 'npx', $1, '{}', true, '读写本地文件系统——在渗透测试中存取载荷、脚本输出、发现的配置文件等')
+VALUES ('filesystem', 'stdio', 'npx', $1, '{}', true, 'Read and write the local filesystem — store payloads, script output, discovered config files, etc. during pentesting')
 ON CONFLICT (name) DO NOTHING`,
 		`["@modelcontextprotocol/server-filesystem","/tmp/antifox-fs"]`); err != nil {
 		return fmt.Errorf("seed filesystem mcp: %w", err)
@@ -216,7 +220,7 @@ ON CONFLICT (name) DO NOTHING`,
 	// deploy. Operator enables it after setting a token on the MCP page.
 	if _, err := d.Exec(`
 INSERT INTO mcp_servers(name, transport, command, args, env, enabled, description)
-VALUES ('github', 'stdio', 'npx', $1, $2, false, 'GitHub 仓库侦察——搜索公开代码库中可能泄露的凭据、密钥、敏感配置，或分析目标组织开源项目代码（需在 MCP 页填入 GITHUB_PERSONAL_ACCESS_TOKEN 后启用）')
+VALUES ('github', 'stdio', 'npx', $1, $2, false, 'GitHub repository recon — search public repos for leaked credentials, keys, or sensitive config, or analyze the target organization's open-source code (requires a GITHUB_PERSONAL_ACCESS_TOKEN on the MCP page to enable)')
 ON CONFLICT (name) DO NOTHING`,
 		`["@modelcontextprotocol/server-github"]`, `{"GITHUB_PERSONAL_ACCESS_TOKEN":"<your-token>"}`); err != nil {
 		return fmt.Errorf("seed github mcp: %w", err)
@@ -244,13 +248,15 @@ ON CONFLICT (name) DO NOTHING`,
 // Records the outcome in the settings flag "knowledge.vector_available".
 func (d *DB) ensureKnowledgeVectorSchema() {
 	if _, err := d.Exec(`CREATE EXTENSION IF NOT EXISTS vector`); err != nil {
-		log.Printf("[knowledge] pgvector 不可用（%v）——语义检索禁用，降级为关键词检索。"+
-			"启用需超级用户执行一次 CREATE EXTENSION vector", err)
+		log.Printf("[knowledge] pgvector unavailable (%v) — semantic search disabled, falling back to keyword search."+
+			"a superuser must run CREATE EXTENSION vector once to enable it", err)
 		_ = d.SetBool("knowledge.vector_available", false)
 		return
 	}
-	// embedding 用不定维 vector 列 + 每 chunk 记 embed_model/dim；检索时按当前模型过滤，
-	// 换 embedder 不串味（旧模型行被忽略，重建索引后统一）。数据量级用精确扫描即可。
+	// Embeddings use a variable-dimension vector column + per-chunk embed_model/dim;
+	// retrieval filters by the current model so switching embedders doesn't mix
+	// vectors (old-model rows are ignored until the index is rebuilt). Exact scan is
+	// fine at this data volume.
 	if _, err := d.Exec(`
 CREATE TABLE IF NOT EXISTS knowledge_chunks (
     id          BIGSERIAL PRIMARY KEY,
@@ -264,7 +270,7 @@ CREATE TABLE IF NOT EXISTS knowledge_chunks (
 );
 CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_doc ON knowledge_chunks(doc_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_model ON knowledge_chunks(embed_model);`); err != nil {
-		log.Printf("[knowledge] 建 knowledge_chunks 失败（%v）——语义检索禁用", err)
+		log.Printf("[knowledge] failed to create knowledge_chunks (%v) — semantic search disabled", err)
 		_ = d.SetBool("knowledge.vector_available", false)
 		return
 	}
@@ -280,10 +286,11 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_model ON knowledge_chunks(embed_
 // that MCP is enabled/configured.
 var builtinSkillVisibility = map[string][]string{
 	"api-recon": {"auto", "pentest", "worker"},
-	// 迁移自旧 AntiFox 的渗透测试方法论库（工具无关，经 Bash 用公开命令行工具）。
-	// 默认对测试类 agent 可见（worker/auto/pentest）；planner/mainagent 保持干净。
-	// incident-response(蓝队向) 与 security-awareness-training(培训向) 有意不默认可见——
-	// 已安装，用户需要时在 Skills 页按 agent 开启。
+	// Pentest methodology library migrated from old AntiFox (tool-agnostic; uses
+	// public CLI tools via Bash). Visible to execution agents by default
+	// (worker/auto/pentest); planner/mainagent stay clean. incident-response
+	// (blue-team) and security-awareness-training are intentionally not default —
+	// installed, but the user enables them per agent on the Skills page.
 	"api-security-testing":        {"worker", "auto", "pentest"},
 	"business-logic-testing":      {"worker", "auto", "pentest"},
 	"cloud-security-audit":        {"worker", "auto", "pentest"},
@@ -368,164 +375,164 @@ func (d *DB) seedDefaultInterceptRules() error {
 		priority int
 	}
 	rules := []rule{
-		// ── 系统破坏性命令 (priority 100) ──────────────────────────────────
+		// ── system-destructive commands (priority 100) ──────────────────────────────
 		{
-			name:     "[内置] 递归强制删除 rm -rf",
+			name:     "[builtin] recursive force-delete rm -rf",
 			target:   "tool_input",
 			typ:      "regex",
 			pattern:  `(?i)\brm\b.{0,80}(?:-[a-z]*r[a-z]*f[a-z]*|-[a-z]*f[a-z]*r[a-z]*|--recursive|--no-preserve-root)`,
 			action:   "deny",
-			message:  "禁止执行递归强制删除（rm -rf / rm --recursive），可能永久损坏系统或靶机环境",
+			message:  "recursive force-delete is forbidden (rm -rf / rm --recursive) — it can permanently damage the system or target environment",
 			priority: 100,
 		},
 		{
-			name:     "[内置] 删除系统关键目录",
+			name:     "[builtin] delete critical system directories",
 			target:   "tool_input",
 			typ:      "regex",
 			pattern:  `\brm\b[^"'\n]{0,60}["'\s](/|/etc|/bin|/usr|/boot|/var|/lib|/sys|/proc|/dev|/sbin|/root)`,
 			action:   "deny",
-			message:  "禁止删除系统关键路径",
+			message:  "deleting critical system paths is forbidden",
 			priority: 100,
 		},
 		{
-			name:     "[内置] 磁盘格式化 mkfs",
+			name:     "[builtin] disk formatting mkfs",
 			target:   "tool_input",
 			typ:      "regex",
 			pattern:  `\bmkfs\b`,
 			action:   "deny",
-			message:  "禁止格式化磁盘（mkfs）",
+			message:  "formatting disks (mkfs) is forbidden",
 			priority: 100,
 		},
 		{
-			name:     "[内置] 覆写磁盘设备 dd",
+			name:     "[builtin] overwrite disk device with dd",
 			target:   "tool_input",
 			typ:      "regex",
 			pattern:  `\bdd\b[^|\n]{0,100}\bof=\s*/dev/[a-zA-Z]`,
 			action:   "deny",
-			message:  "禁止使用 dd 覆写磁盘设备",
+			message:  "overwriting disk devices with dd is forbidden",
 			priority: 100,
 		},
 		{
-			name:     "[内置] Fork 炸弹",
+			name:     "[builtin] fork bomb",
 			target:   "tool_input",
 			typ:      "regex",
 			pattern:  `:\(\)\s*\{[^}]*:\|:`,
 			action:   "deny",
-			message:  "禁止执行 Fork 炸弹",
+			message:  "fork bombs are forbidden",
 			priority: 100,
 		},
 		{
-			name:     "[内置] 关机 / 重启",
+			name:     "[builtin] shutdown / reboot",
 			target:   "tool_input",
 			typ:      "regex",
 			pattern:  `\b(?:shutdown|reboot|halt|poweroff|init\s+[06])\b`,
 			action:   "deny",
-			message:  "禁止执行关机或重启命令",
+			message:  "shutdown or reboot commands are forbidden",
 			priority: 100,
 		},
 		{
-			name:     "[内置] 杀死全部进程",
+			name:     "[builtin] kill all processes",
 			target:   "tool_input",
 			typ:      "regex",
 			pattern:  `\bkill\s+-9\s+-1\b|\bkillall\s+-9\b`,
 			action:   "deny",
-			message:  "禁止 kill -9 -1 或 killall -9（杀死所有进程）",
+			message:  "kill -9 -1 or killall -9 is forbidden (kills all processes)",
 			priority: 100,
 		},
 		{
-			name:     "[内置] 磁盘擦除 shred / wipe",
+			name:     "[builtin] disk wiping shred / wipe",
 			target:   "tool_input",
 			typ:      "regex",
 			pattern:  `\b(?:shred|wipe)\b[^|\n]{0,80}/dev/[a-zA-Z]`,
 			action:   "deny",
-			message:  "禁止对磁盘设备执行 shred/wipe 擦除",
+			message:  "running shred/wipe on disk devices is forbidden",
 			priority: 100,
 		},
 		{
-			name:     "[内置] 清空防火墙规则",
+			name:     "[builtin] flush firewall rules",
 			target:   "tool_input",
 			typ:      "regex",
 			pattern:  `\biptables\s+(?:-F|--flush)\b|\bnft\s+flush\s+ruleset\b`,
 			action:   "deny",
-			message:  "禁止清空防火墙规则（iptables -F / nft flush）",
+			message:  "flushing firewall rules is forbidden (iptables -F / nft flush)",
 			priority: 100,
 		},
-		// ── 数据库破坏性操作 (priority 90) ─────────────────────────────────
+		// ── destructive database operations (priority 90) ─────────────────────────
 		{
-			name:     "[内置] SQL DROP DATABASE / TABLE / SCHEMA",
+			name:     "[builtin] SQL DROP DATABASE / TABLE / SCHEMA",
 			target:   "tool_input",
 			typ:      "regex",
 			pattern:  `(?i)\bDROP\s+(?:DATABASE|TABLE|SCHEMA|INDEX|VIEW|TABLESPACE|USER|ROLE)\b`,
 			action:   "deny",
-			message:  "禁止执行 DROP 操作，可能不可逆地销毁数据库对象",
+			message:  "DROP operations are forbidden — they can irreversibly destroy database objects",
 			priority: 90,
 		},
 		{
-			name:     "[内置] SQL TRUNCATE",
+			name:     "[builtin] SQL TRUNCATE",
 			target:   "tool_input",
 			typ:      "regex",
 			pattern:  `(?i)\bTRUNCATE\s+(?:TABLE\s+)?\w`,
 			action:   "deny",
-			message:  "禁止执行 TRUNCATE，可能清空数据表所有数据",
+			message:  "TRUNCATE is forbidden — it may empty all data in a table",
 			priority: 90,
 		},
 		{
-			name:     "[内置] MongoDB drop / dropDatabase",
+			name:     "[builtin] MongoDB drop / dropDatabase",
 			target:   "tool_input",
 			typ:      "regex",
 			pattern:  `(?i)\.(?:dropDatabase|dropCollection|drop)\s*\(`,
 			action:   "deny",
-			message:  "禁止执行 MongoDB drop 操作",
+			message:  "MongoDB drop operations are forbidden",
 			priority: 90,
 		},
 		{
-			name:     "[内置] Redis FLUSHALL / FLUSHDB",
+			name:     "[builtin] Redis FLUSHALL / FLUSHDB",
 			target:   "tool_input",
 			typ:      "regex",
 			pattern:  `(?i)\b(?:FLUSHALL|FLUSHDB)\b`,
 			action:   "deny",
-			message:  "禁止执行 Redis FLUSHALL / FLUSHDB，可能清空全部缓存数据",
+			message:  "Redis FLUSHALL / FLUSHDB is forbidden — it may wipe all cached data",
 			priority: 90,
 		},
-		// ── HTTP 破坏性请求 (priority 80) ──────────────────────────────────
-		// Agent 发送 DELETE 请求的三种常见方式：
-		//   1. curl -X DELETE / --request DELETE（Bash 工具直接执行或写入脚本）
-		//   2. Python HTTP 客户端 .delete() 方法
-		//   3. JS/通用脚本里的 method: 'DELETE' / method="DELETE"
+		// ── destructive HTTP requests (priority 80) ──────────────────────────────
+		// Three common ways an agent sends DELETE requests:
+		//   1. curl -X DELETE / --request DELETE (via Bash directly or inside a script)
+		//   2. Python HTTP client .delete() method
+		//   3. method: 'DELETE' / method="DELETE" in JS/generic scripts
 		{
-			name:    "[内置] curl / wget 发送 DELETE 请求",
-			target:  "tool_input",
-			typ:     "regex",
-			pattern: `(?i)\bcurl\b[^|\n&;"]{0,300}(?:-X\s*DELETE|--request\s+DELETE|-XDELETE)|\bwget\b[^|\n&;"]{0,300}--method[=\s]+DELETE`,
-			action:  "deny",
-			message: "禁止通过 curl/wget 发送 HTTP DELETE 请求，可能删除目标系统数据",
+			name:     "[builtin] curl / wget sending DELETE requests",
+			target:   "tool_input",
+			typ:      "regex",
+			pattern:  `(?i)\bcurl\b[^|\n&;"]{0,300}(?:-X\s*DELETE|--request\s+DELETE|-XDELETE)|\bwget\b[^|\n&;"]{0,300}--method[=\s]+DELETE`,
+			action:   "deny",
+			message:  "sending HTTP DELETE requests via curl/wget is forbidden — it may delete target-system data",
 			priority: 80,
 		},
 		{
-			name:    "[内置] Python HTTP 客户端 DELETE（requests/httpx/aiohttp）",
-			target:  "tool_input",
-			typ:     "regex",
-			pattern: `(?i)\b(?:requests|httpx|aiohttp|urllib\.request)\.delete\s*\(|session\.delete\s*\(|client\.delete\s*\(`,
-			action:  "deny",
-			message: "禁止使用 Python HTTP 客户端发送 DELETE 请求",
+			name:     "[builtin] Python HTTP client DELETE (requests/httpx/aiohttp)",
+			target:   "tool_input",
+			typ:      "regex",
+			pattern:  `(?i)\b(?:requests|httpx|aiohttp|urllib\.request)\.delete\s*\(|session\.delete\s*\(|client\.delete\s*\(`,
+			action:   "deny",
+			message:  "sending DELETE requests via Python HTTP clients is forbidden",
 			priority: 80,
 		},
 		{
-			name:    "[内置] 脚本中声明 HTTP DELETE 方法（JS/通用）",
-			target:  "tool_input",
-			typ:     "regex",
-			pattern: `(?i)axios\.delete\s*\(|method\s*[:=]\s*['"]DELETE['"]`,
-			action:  "deny",
-			message: "禁止在脚本中声明并发送 HTTP DELETE 请求",
+			name:     "[builtin] declaring HTTP DELETE method in scripts (JS/generic)",
+			target:   "tool_input",
+			typ:      "regex",
+			pattern:  `(?i)axios\.delete\s*\(|method\s*[:=]\s*['"]DELETE['"]`,
+			action:   "deny",
+			message:  "declaring and sending HTTP DELETE requests in scripts is forbidden",
 			priority: 80,
 		},
 		{
-			name:     "[内置] 批量清空 / 清除接口路径",
+			name:     "[builtin] bulk clear / wipe endpoint paths",
 			target:   "tool_input",
 			typ:      "regex",
 			pattern:  `(?i)/(?:clear|wipe|flush|purge|truncate|drop|destroy|factory[-_]reset|reset[-_]all)(?:[/?#"'\s]|$)`,
 			action:   "deny",
-			message:  "禁止调用批量清空或销毁类接口（/clear /wipe /flush /purge 等）",
+			message:  "calling bulk-clear or destroy-type endpoints is forbidden (/clear /wipe /flush /purge etc.)",
 			priority: 80,
 		},
 	}

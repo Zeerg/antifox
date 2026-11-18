@@ -77,10 +77,10 @@ func splitParagraphs(text string) []string {
 func embedInput(category, title, chunk string) string {
 	var b strings.Builder
 	if category != "" {
-		b.WriteString("[分类：" + category + "] ")
+		b.WriteString("[category: " + category + "] ")
 	}
 	if title != "" {
-		b.WriteString("[标题：" + title + "]\n")
+		b.WriteString("[title: " + title + "]\n")
 	}
 	b.WriteString(chunk)
 	return b.String()

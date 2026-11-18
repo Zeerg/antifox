@@ -15,9 +15,9 @@ func TestParseScopeLine(t *testing.T) {
 		{"example.com", "domain", false},
 		{"https://sub.example.com/path", "domain", false},
 		{"1.2.3.4", "ip", false},
-		{"10.0.0.0/8", "", true},       // over-broad IPv4 (< /16)
+		{"10.0.0.0/8", "", true}, // over-broad IPv4 (< /16)
 		{"198.51.100.0/24", "cidr", false},
-		{"co.uk", "", true},            // bare public suffix
+		{"co.uk", "", true}, // bare public suffix
 		{"not a host", "", true},
 		{"1.2.3.1-1.2.3.9", "", true}, // ranges must be CIDR
 	}
@@ -73,7 +73,7 @@ func TestCompanyScopeAttribution(t *testing.T) {
 		t.Fatalf("UpsertCompany: %v", err)
 	}
 	t.Cleanup(func() {
-		// 连 company + scope 一起删，避免残留规则让下次运行的唯一域名撞上旧归属。
+		// deletes company + scope together, so a leftover rule can't collide with a fresh run's ownership.
 		_, _ = d.Exec(`DELETE FROM company_scope WHERE company_id = $1`, cid)
 		_, _ = d.Exec(`DELETE FROM companies WHERE id = $1`, cid)
 	})
