@@ -220,7 +220,7 @@ ON CONFLICT (name) DO NOTHING`,
 	// deploy. Operator enables it after setting a token on the MCP page.
 	if _, err := d.Exec(`
 INSERT INTO mcp_servers(name, transport, command, args, env, enabled, description)
-VALUES ('github', 'stdio', 'npx', $1, $2, false, 'GitHub repository recon — search public repos for leaked credentials, keys, or sensitive config, or analyze the target organization's open-source code (requires a GITHUB_PERSONAL_ACCESS_TOKEN on the MCP page to enable)')
+VALUES ('github', 'stdio', 'npx', $1, $2, false, 'GitHub repository recon — search public repos for leaked credentials, keys, or sensitive config, or analyze the target organization''s open-source code (requires a GITHUB_PERSONAL_ACCESS_TOKEN on the MCP page to enable)')
 ON CONFLICT (name) DO NOTHING`,
 		`["@modelcontextprotocol/server-github"]`, `{"GITHUB_PERSONAL_ACCESS_TOKEN":"<your-token>"}`); err != nil {
 		return fmt.Errorf("seed github mcp: %w", err)
