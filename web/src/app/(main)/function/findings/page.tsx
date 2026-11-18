@@ -17,6 +17,7 @@ import {
   SparklesIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import i18n from "@/i18n/config";
 
 import { FindingDetail } from "@/components/finding-detail";
 import { StatusBadge } from "@/components/status-badge";
@@ -54,7 +55,7 @@ function SeverityPill({ sev }: { sev: string }) {
 }
 
 function fmtTime(ts: string) {
-  return new Date(ts).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return new Date(ts).toLocaleString(i18n.language, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 // extractTarget pulls the affected host/URL out of the finding text (summary +

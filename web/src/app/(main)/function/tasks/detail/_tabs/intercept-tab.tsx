@@ -4,6 +4,7 @@ import * as React from "react";
 import { CheckIcon, RefreshCwIcon, ShieldAlertIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
+import i18n from "@/i18n/config";
 import { api } from "@/lib/api";
 import type { InterceptApprovalRow } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +14,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 
 function fmtTime(s: string) {
   if (!s) return "—";
-  return new Date(s).toLocaleString("zh-CN", {
+  return new Date(s).toLocaleString(i18n.language, {
     month: "2-digit", day: "2-digit",
     hour: "2-digit", minute: "2-digit", second: "2-digit",
   });

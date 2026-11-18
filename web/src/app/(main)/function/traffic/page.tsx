@@ -13,6 +13,7 @@ import {
   Minimize2Icon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import i18n from "@/i18n/config";
 
 import { HttpPacket, requestWithHost } from "@/components/http-packet";
 import { PacketShotModal } from "@/components/packet-shot-modal";
@@ -44,7 +45,7 @@ import { taskLabel } from "@/lib/task-label";
 import type { Task, TrafficExchange, TrafficResp, TrafficDetail } from "@/lib/types";
 
 function fmtTime(ts: string) {
-  return new Date(ts).toLocaleString("zh-CN", {
+  return new Date(ts).toLocaleString(i18n.language, {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",

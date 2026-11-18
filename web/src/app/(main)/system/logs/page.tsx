@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { useTranslation } from "react-i18next";
+import i18n from "@/i18n/config";
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -43,7 +44,7 @@ function fmtTime(ts: string) {
   const d = new Date(ts);
   if (isNaN(d.getTime())) return "";
   // show full date+time (login logs etc. need date to disambiguate; time alone misleads).
-  return d.toLocaleString("zh-CN", {
+  return d.toLocaleString(i18n.language, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

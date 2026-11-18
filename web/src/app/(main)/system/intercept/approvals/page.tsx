@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useTranslation } from "react-i18next";
+import i18n from "@/i18n/config";
 import { CheckIcon, ClipboardListIcon, RefreshCwIcon, ShieldAlertIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -16,7 +17,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 function fmtTime(s: string) {
   if (!s) return "—";
   const d = new Date(s);
-  return d.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return d.toLocaleString(i18n.language, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function SourceCell({ row }: { row: InterceptApprovalRow }) {

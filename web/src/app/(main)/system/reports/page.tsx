@@ -4,6 +4,7 @@ import * as React from "react";
 
 import { DownloadIcon, FileTextIcon, ImageIcon, Loader2Icon, PencilIcon, PlusIcon, SparklesIcon, TrashIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import i18n from "@/i18n/config";
 import type { TFunction } from "i18next";
 import { toast } from "sonner";
 
@@ -43,7 +44,7 @@ function emptyTemplate(): ReportTemplate {
     logo_path: "",
     personnel: [],
     cvss_version: "3.1",
-    locale: "zh-CN",
+    locale: i18n.language,
   };
 }
 
@@ -58,7 +59,7 @@ function fmtSize(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 function fmtTime(ts: string) {
-  return new Date(ts).toLocaleString("zh-CN");
+  return new Date(ts).toLocaleString(i18n.language);
 }
 
 export default function ReportsPage() {
@@ -81,7 +82,7 @@ export default function ReportsPage() {
   const [selTask, setSelTask] = React.useState("");
   const [title, setTitle] = React.useState("");
   const [client, setClient] = React.useState("");
-  const [locale, setLocale] = React.useState("zh-CN");
+  const [locale, setLocale] = React.useState(i18n.language);
   const [format, setFormat] = React.useState("docx"); // docx | md
   const [taskFindings, setTaskFindings] = React.useState<Finding[]>([]);
   const [selFindings, setSelFindings] = React.useState<Set<string>>(new Set());
@@ -187,7 +188,7 @@ export default function ReportsPage() {
     setSelTask("");
     setTitle("");
     setClient("");
-    setLocale("zh-CN");
+    setLocale(i18n.language);
     setSelTemplate("");
     setTaskFindings([]);
     setSelFindings(new Set());

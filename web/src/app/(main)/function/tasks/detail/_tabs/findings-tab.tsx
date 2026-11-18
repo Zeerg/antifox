@@ -4,6 +4,7 @@ import * as React from "react";
 
 import { ChevronRightIcon, Loader2Icon, SparklesIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import i18n from "@/i18n/config";
 import { toast } from "sonner";
 
 import { FindingDetail } from "@/components/finding-detail";
@@ -32,7 +33,7 @@ function Row({ f, onChanged }: { f: Finding; onChanged: () => void }) {
           <span className="font-medium">{name}</span>
           <span className="text-muted-foreground ml-2 text-xs">{f.summary}</span>
         </span>
-        <span className="shrink-0 text-xs text-muted-foreground">{new Date(f.ts).toLocaleString("zh-CN")}</span>
+        <span className="shrink-0 text-xs text-muted-foreground">{new Date(f.ts).toLocaleString(i18n.language)}</span>
       </button>
       {open && (
         <div className="bg-muted/30 px-4 pb-4 pl-11">
