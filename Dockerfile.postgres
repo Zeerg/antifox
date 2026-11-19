@@ -1,0 +1,5 @@
+FROM postgres:16-alpine
+# pgvector for the knowledge-base semantic layer (in-process embedder writes
+# vectors; retrieval uses <=> cosine distance). Alpine build keeps musl so the
+# data volume stays compatible with stock postgres:16-alpine.
+RUN apk add --no-cache postgresql-pgvector
