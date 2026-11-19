@@ -782,10 +782,10 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_logs_task ON knowledge_retrieval_logs(t
 CREATE TABLE IF NOT EXISTS knowledge_config (
     id         INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     enabled    BOOLEAN NOT NULL DEFAULT false,             -- semantic-search switch; off = keyword only
-    base_url   TEXT NOT NULL DEFAULT 'https://open.bigmodel.cn/api/paas/v4',
-    model      TEXT NOT NULL DEFAULT 'embedding-3',
+    base_url   TEXT NOT NULL DEFAULT 'builtin',
+    model      TEXT NOT NULL DEFAULT 'potion-base-8M',
     api_key    TEXT NOT NULL DEFAULT '',
-    dim        INT  NOT NULL DEFAULT 1024,
+    dim        INT  NOT NULL DEFAULT 256,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 INSERT INTO knowledge_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING;

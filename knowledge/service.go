@@ -22,7 +22,8 @@ const (
 )
 
 // SemanticReady reports whether vector search can run: pgvector present + embedder
-// enabled + a key configured. When false, retrieval uses keyword search.
+// enabled + usable (builtin model needs no key; remote endpoints do). When false,
+// retrieval uses keyword search.
 func (s *Service) SemanticReady() bool {
 	if s == nil || s.pg == nil || !s.pg.KnowledgeVectorAvailable() {
 		return false
@@ -31,7 +32,10 @@ func (s *Service) SemanticReady() bool {
 	if err != nil || cfg == nil {
 		return false
 	}
-	return cfg.Enabled && strings.TrimSpace(cfg.APIKey) != ""
+	if !cfg.Enabled {
+		return false
+	}
+	return EmbedConfig{BaseURL: cfg.BaseURL}.IsBuiltin() || strings.TrimSpace(cfg.APIKey) != ""
 }
 
 // Categories lists knowledge categories visible for the scope (global + task).
@@ -130,7 +134,7 @@ func (s *Service) SearchAndLog(ctx context.Context, query string, taskID int64, 
 // semantic search to be ready.
 func (s *Service) Reindex(ctx context.Context) (int, error) {
 	if !s.SemanticReady() {
-		return 0, fmt.Errorf("semantic search not ready: requires pgvector + an enabled embedder + configured api_key")
+		return 0, fmt.Errorf("semantic search not ready: requires pgvector + an enabled embedder (+ api_key for remote endpoints)")
 	}
 	if err := s.pg.ClearKnowledgeChunks(); err != nil {
 		return 0, err

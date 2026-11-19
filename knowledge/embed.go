@@ -13,15 +13,30 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"antifox/knowledge/embedmodel"
 )
 
 // EmbedConfig is one OpenAI-compatible embeddings endpoint (works with Zhipu/
-// SiliconFlow/OpenAI/Ollama — all expose POST {base}/embeddings).
+// SiliconFlow/OpenAI/Ollama — all expose POST {base}/embeddings), or the
+// vendored local model when BaseURL is BuiltinBaseURL.
 type EmbedConfig struct {
 	BaseURL string
 	Model   string
 	APIKey  string
 	Dim     int
+}
+
+// BuiltinBaseURL is the sentinel meaning "embed in-process with the vendored
+// potion-base-8M model" — no network calls, no API key needed.
+const BuiltinBaseURL = "builtin"
+
+// IsBuiltin reports whether this config targets the vendored local model.
+// An empty base URL also resolves to builtin so an operator blanking the
+// endpoint can never silently re-point embeddings at a remote default.
+func (c EmbedConfig) IsBuiltin() bool {
+	u := strings.TrimSpace(c.BaseURL)
+	return u == "" || u == BuiltinBaseURL
 }
 
 type embedReq struct {
@@ -44,6 +59,9 @@ type embedResp struct {
 // batch modest — callers chunk large sets). Preserves input order via the
 // response's index field.
 func EmbedTexts(ctx context.Context, cfg EmbedConfig, texts []string) ([][]float32, error) {
+	if cfg.IsBuiltin() {
+		return embedmodel.Embed(texts)
+	}
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return nil, fmt.Errorf("embedder api_key not configured")
 	}

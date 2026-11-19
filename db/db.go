@@ -238,6 +238,7 @@ ON CONFLICT (name) DO NOTHING`,
 		return fmt.Errorf("seed intercept rules: %w", err)
 	}
 	d.backfillSeedTextEnglish()
+	d.migrateKnowledgeConfigToBuiltin()
 	d.ensureKnowledgeVectorSchema() // best-effort; degrades to keyword search if pgvector absent
 	return nil
 }
@@ -574,4 +575,16 @@ func (d *DB) backfillSeedTextEnglish() {
 		`GitHub repository recon — search public repos for leaked credentials, keys, or sensitive config, or analyze the target organization's open-source code (requires a GITHUB_PERSONAL_ACCESS_TOKEN on the MCP page to enable)`)
 	d.Exec(`UPDATE rbac_users SET display_name='Administrator' WHERE username='admin' AND display_name='管理员'`) //nolint:errcheck
 	_ = d.SetSetting("seed_text_en_v1", "done")
+}
+
+// migrateKnowledgeConfigToBuiltin moves a still-on-the-old-default embedder
+// config onto the vendored in-process model. Only fires while base_url is the
+// factory default — any operator-set endpoint is left alone.
+func (d *DB) migrateKnowledgeConfigToBuiltin() {
+	if v, _, _ := d.GetSetting("builtin_embedder_v1"); v == "done" {
+		return
+	}
+	d.Exec(`UPDATE knowledge_config SET base_url='builtin', model='potion-base-8M', api_key='', dim=256, updated_at=now()
+		WHERE base_url='https://open.bigmodel.cn/api/paas/v4'`) //nolint:errcheck
+	_ = d.SetSetting("builtin_embedder_v1", "done")
 }

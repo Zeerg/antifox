@@ -79,7 +79,7 @@ func (d *DB) GetKnowledgeConfig() (*KnowledgeConfig, error) {
 	err := d.QueryRow(`SELECT enabled, base_url, model, COALESCE(api_key,''), dim FROM knowledge_config WHERE id=1`).
 		Scan(&c.Enabled, &c.BaseURL, &c.Model, &c.APIKey, &c.Dim)
 	if err == sql.ErrNoRows {
-		return &KnowledgeConfig{BaseURL: "https://open.bigmodel.cn/api/paas/v4", Model: "embedding-3", Dim: 1024}, nil
+		return &KnowledgeConfig{BaseURL: "builtin", Model: "potion-base-8M", Dim: 256}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -97,7 +97,7 @@ var ErrKnowledgeKeyRequired = errors.New("re-entering the API key is required wh
 // a changed address with an empty key returns ErrKnowledgeKeyRequired (credentials must be re-entered bound to the new target).
 func (d *DB) SaveKnowledgeConfig(enabled bool, baseURL, model, apiKey string, dim int) error {
 	if dim <= 0 {
-		dim = 1024
+		dim = 256
 	}
 	if strings.TrimSpace(apiKey) == "" {
 		res, err := d.Exec(`UPDATE knowledge_config SET enabled=$1, base_url=$2, model=$3, dim=$4, updated_at=now()
