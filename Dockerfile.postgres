@@ -5,7 +5,7 @@
 # against this image's postgres 16 via PGXS.
 FROM postgres:16-alpine AS pgvector-build
 ARG PGVECTOR_VERSION=0.8.1
-RUN apk add --no-cache build-base curl \
+RUN apk add --no-cache build-base curl clang21 llvm21 \
  && curl -fsSL https://github.com/pgvector/pgvector/archive/refs/tags/v${PGVECTOR_VERSION}.tar.gz | tar xz \
  && make -C pgvector-${PGVECTOR_VERSION} && make -C pgvector-${PGVECTOR_VERSION} install
 
